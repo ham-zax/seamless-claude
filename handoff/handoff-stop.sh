@@ -8,7 +8,7 @@
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ] || exit 0
 set -u
 
-sid=$(jq -r '.session_id' 2>/dev/null)
+IFS=$'\t' read -r sid active < <(jq -r '[.session_id, (.stop_hook_active // false)] | @tsv' 2>/dev/null)
 [[ $sid =~ ^[A-Za-z0-9-]+$ ]] || exit 0
 state=$HOME/.claude/handoffs/.state
 rec=$state/pid-${CLAUDE_PID:-x}
@@ -16,6 +16,12 @@ rec=$state/pid-${CLAUDE_PID:-x}
 read -r start file model < "$rec"
 [ "$start" = "$(sed 's/.*) //' "/proc/$CLAUDE_PID/stat" 2>/dev/null | cut -d' ' -f20)" ] || exit 0  # PID reused
 [ "${file##*/}" = "$sid.md" ] && [ -f "$file" ] || exit 0   # this session's handoff, not yet loaded
+# The section makes Claude check what the user has not seen yet. Block once: stop_hook_active is set
+# on the retry, so a handoff without the section cannot loop.
+if [ "$active" != true ] && ! grep -q '^## Owed to the user' "$file"; then
+  jq -n --arg f "$file" '{decision: "block", reason: "[handoff] The handoff \($f) has no \"## Owed to the user\" section. Add it: every user question not yet answered in a visible reply, or \"none\". If a short answer is owed, give it in visible text now. Then end your turn."}'
+  exit 0
+fi
 status=$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } $1 == "status:" { print $2; exit }' "$file")
 [ "$status" = continue ] || exit 0
 
@@ -43,15 +49,28 @@ fi
 (set -o noclobber; : > "$state/pid-$CLAUDE_PID.auto") 2>/dev/null || exit 0
 printf '%s %s\n' "$start" $((n + 1)) > "$cycles"
 
-# The helper owns the rest of the cycle and ends within about 35 s. It types only after Claude is
-# idle, and the prompt only after the /clear removed the binding.
+# The helper owns the rest of the cycle and ends within about 95 s. It types only after Claude is
+# idle, and the prompt only after the /clear removed the binding. Keys typed while the user types
+# would mix with the user's keys: it types only after 2 s without client input (tmux
+# client_activity), and gives up after 30 s of activity.
 # shellcheck disable=SC2016  # the helper expands its own arguments
 setsid -f bash -c '
+  quiet() {
+    local last
+    for _ in $(seq 60); do
+      last=$(tmux list-clients -t "$1" -F "#{client_activity}" 2>/dev/null | sort -n | tail -n 1)
+      [ -z "$last" ] || (( $(date +%s) - last >= 2 )) && return 0
+      sleep 0.5
+    done
+    return 1
+  }
   sleep 2
+  quiet "$1" || exit 0
   tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || exit 0
   for _ in $(seq 60); do [ -e "$2" ] || break; sleep 0.5; done
   [ -e "$2" ] && exit 0
   sleep 1
+  quiet "$1" || exit 0
   tmux send-keys -t "$1" -l "Continue from the handoff." && tmux send-keys -t "$1" Enter
 ' handoff-clear "$TMUX_PANE" "$rec" < /dev/null > /dev/null 2>&1
-say "Handoff written. Clearing and continuing in a new session (cycle $((n + 1)))."
+say "Handoff written. Clearing and continuing in a new session (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear."

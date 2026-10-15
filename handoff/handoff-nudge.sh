@@ -47,6 +47,9 @@ bind() {
   [ -n "$start" ] && printf '%s %s %s\n' "$start" "$file" "$model" > "$state/pid-$CLAUDE_PID"
 }
 after="A hook then clears the session and continues from the handoff in a new session."
+# The warning often arrives on a user prompt. A handoff never replaces the reply to that prompt: an
+# answer that only exists in reasoning or in the handoff file is lost at /clear.
+owed="A handoff never replaces a reply. If the user asked something, answer it in visible text first when the answer is short. Otherwise list it under ## Owed to the user."
 
 template="The handoff replaces this whole conversation for the next session. Keep only what is expensive or impossible to rebuild from git and the repository. Rules: about 2000 words at most. Omit empty sections. Keep paths, commands, IDs and error messages verbatim. Give pointers (file:line, command) instead of file contents. Do not list modified files: git shows them.
 status: write continue if work remains that you can do without the user. Write done if the request is complete and verified, or the next step needs the user.
@@ -59,6 +62,8 @@ status: continue | done
 ---
 ## Goal
 The request and its done condition. Quote the user's direction-setting messages verbatim: requests, corrections, constraints, approvals.
+## Owed to the user
+Always include this section. List every user question or request that the user has not yet seen answered in a visible reply, quoted verbatim, with any partial findings. An answer that exists only in your reasoning or in this file is owed. Write \"none\" only if the user saw every answer.
 ## State
 What is done and how it was verified (command and result). What is in progress.
 ## Decisions
@@ -77,6 +82,7 @@ if (( tokens < hard )); then
   bind
   msg="[handoff] Context is at ${k}k tokens. At ${h}k a [handoff] message tells you to stop at once.
 Reach a checkpoint before then: finish and verify the current step. Do not start large new work.
+$owed
 At the checkpoint, write the handoff to: $file
 Make it your last action and end your turn. $after
 
@@ -84,7 +90,7 @@ $template"
 elif mark hard; then
   bind
   msg="[handoff] Context is at ${k}k tokens, at the ${h}k stop limit for this model. Stop now. Do not finish the current step.
-Let background jobs run. Move a long foreground command to the background. Write the handoff to $file now as your last action, then end your turn. $after"
+Let background jobs run. Move a long foreground command to the background. List every unanswered user question under ## Owed to the user. Write the handoff to $file now as your last action, then end your turn. $after"
   # Context can jump past the warn limit in one tool result: then the template comes here.
   mark warn && msg+="
 

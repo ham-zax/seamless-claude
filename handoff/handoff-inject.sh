@@ -35,8 +35,14 @@ Source session: $old (full history: claude --resume $old)
 Old transcript: ${tp%/*}/$old.jsonl (read only the part you need, for a detail the handoff left out)
 Written $(( ($(date +%s) - mtime) / 60 )) min ago. File: $used
 Other handoffs for this folder: $dir
+Before the Next step, give the user every item under ## Owed to the user in visible text.
+The handoff holds the old session's claims. Re-check a claim before you build on it when the check is cheap.
 
 $(cat "$file")"
+# Cut at the limit, but say so: the last sections (Next step) go first, and the full file stays on disk.
+max=40000
+(( ${#ctx} <= max )) || ctx="${ctx:0:max}
+[handoff] Cut at $max characters. Read the rest of $used before you continue."
 
-jq -n --arg c "${ctx:0:40000}" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}' \
+jq -n --arg c "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}' \
   && mv "$file" "$used"

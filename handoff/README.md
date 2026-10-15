@@ -13,19 +13,25 @@ fallback. There is no background model call.
    assistant entry.
 2. At the warn limit it injects one message with the template: at the next checkpoint (a finished,
    verified step), write the handoff to `~/.claude/handoffs/<cwd-slug>/<session-id>.md` as the last
-   action and end the turn. It also binds the handoff to this Claude window: `CLAUDE_PID`, the process
-   start time and the model.
+   action and end the turn. A handoff never replaces a reply: Claude answers a short user question in
+   visible text first, else lists it under `## Owed to the user`. The hook also binds the handoff to
+   this Claude window: `CLAUDE_PID`, the process start time and the model.
 3. At the stop limit it injects one message: stop now, let background jobs run, write the handoff at
    once. Each later prompt gets a one-line reminder until the file exists.
-4. The handoff front matter has `status: continue` (work remains that needs no user decision) or
+4. Every handoff has a `## Owed to the user` section: each question the user has not seen answered,
+   or `none`. The front matter has `status: continue` (work remains that needs no user decision) or
    `status: done`.
-5. `handoff-stop.sh` (Stop) acts when this session's handoff exists with `status: continue`:
+5. `handoff-stop.sh` (Stop) blocks the stop once if this session's handoff has no
+   `## Owed to the user` section. Then it acts when the handoff has `status: continue`:
    - in tmux, a detached helper types `/clear` into this pane, waits until the handoff is loaded,
-     then types `Continue from the handoff.`;
+     then types `Continue from the handoff.`. It types only after 2 s without your input
+     (tmux `client_activity`) and gives up after 30 s of typing;
    - outside tmux, or after the automatic clear limit, it tells you to type `/clear`.
 6. `handoff-inject.sh` (SessionStart, matcher `clear`) loads the handoff bound to this window, if the
    file exists and is less than 2 h old, and renames it to `<session-id>.used.md`. The header gives
-   the old transcript path, so the new session can read a detail that the handoff left out. The first
+   the old transcript path, so the new session can read a detail that the handoff left out. The new
+   session gives the owed items before the Next step and re-checks a cheap claim before it builds on
+   it. A handoff over 40,000 characters is cut with a notice that names the full file. The first
    `/clear` in the window removes the binding, with or without a handoff.
 
 `/clear` keeps the Claude process, so the PID stays the same and only the session ID changes. A

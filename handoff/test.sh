@@ -43,12 +43,14 @@ transcript "$proj/s1.jsonl" 120000
 transcript "$proj/s1.jsonl" 136000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *136k*"At the checkpoint, write the handoff to: $hdir/s1.md"*"status: continue | done"*"## Next step"* ]]; check "warn: checkpoint message with template"
+[[ $out == *"never replaces a reply"*"## Owed to the user"*"Always include this section"* ]]; check "warn: reply owed before handoff"
 [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: handoff bound to this window"
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "warn: not repeated"
 
 transcript "$proj/s1.jsonl" 146000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *"Stop now"*"$hdir/s1.md"* && $out != *"## Next step"* ]]; check "hard: stop message, template not repeated"
+[[ $out == *"under ## Owed to the user"* ]]; check "hard: unanswered questions listed as owed"
 [ -z "$(nudge PostToolUse s1 "$proj/s1.jsonl")" ]; check "hard: PostToolUse silent after"
 out=$(nudge UserPromptSubmit s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *"above the 145k"* && $(wc -l <<<"$out") == 1 ]]; check "hard: one-line reminder on prompt"
@@ -114,6 +116,8 @@ later=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%S.000Z)
 } > "$proj/b.jsonl"
 out=$(inject | ctx)
 [[ $out == *"Source session: b"*"## Goal B"* && $out != *"Goal A"* ]]; check "this window: its own handoff injected"
+[[ $out == *"Before the Next step, give the user every item under ## Owed to the user"* ]]; check "inject: owed items first"
+[[ $out == *"Re-check a claim before you build on it"* && $out != *"Cut at"* ]]; check "inject: claims re-checked, small handoff not cut"
 [[ $out == *"Old transcript: $proj/b.jsonl"* && $out != *"late user note"* ]]; check "no transcript copy, old transcript path given"
 [ -e "$hdir/b.used.md" ] && [ ! -e "$hdir/b.md" ] && [ ! -e "$state/pid-$$" ]; check "used: renamed, binding consumed"
 [ -z "$(inject)" ]; check "used: next /clear loads nothing"
@@ -123,6 +127,10 @@ touch -d '-3 hours' "$hdir/a.md" && bind a
 
 echo "## Goal C" > "$hdir/c.md" && bind c 1
 [ -z "$(inject)" ] && [ -e "$hdir/c.md" ]; check "reused PID (other start time): ignored"
+
+head -c 50000 /dev/zero | tr '\0' x > "$hdir/big.md" && bind big
+out=$(inject | ctx)
+[[ $out == *"[handoff] Cut at 40000 characters. Read the rest of $hdir/big.used.md"* ]] && (( ${#out} < 40200 )); check "inject: long handoff cut with a notice"
 
 bind none
 [ -z "$(inject)" ] && [ ! -e "$state/pid-$$" ]; check "no handoff written: binding consumed"
@@ -139,25 +147,33 @@ inject > /dev/null
 
 # --- stop ---
 # A fake tmux logs the keys. Its first Enter (after /clear) removes the binding, as handoff-inject.sh
-# does. A fake sleep makes the detached helper fast. Both are on PATH for the hook only.
+# does. Its list-clients logs each poll and prints $tmp/activity (last client input, epoch s) if it
+# exists. A fake sleep makes the detached helper fast. Both are on PATH for the hook only.
 fake=$tmp/fake && mkdir -p "$fake"
-printf '#!/bin/sh\necho "$*" >> "%s/keys"\n[ "$*" = "send-keys -t %%9 Enter" ] && rm -f "%s/pid-%s"\nexit 0\n' \
-  "$tmp" "$state" "$$" > "$fake/tmux"
+# shellcheck disable=SC2016  # the fake script expands its own arguments
+printf '#!/bin/sh\nif [ "$1" = list-clients ]; then echo >> "%s/polls"; cat "%s/activity" 2>/dev/null; exit 0; fi\necho "$*" >> "%s/keys"\n[ "$*" = "send-keys -t %%9 Enter" ] && rm -f "%s/pid-%s"\nexit 0\n' \
+  "$tmp" "$tmp" "$tmp" "$state" "$$" > "$fake/tmux"
 printf '#!/bin/sh\nexit 0\n' > "$fake/sleep"
 chmod +x "$fake/tmux" "$fake/sleep"
-stop() { jq -nc --arg s "$1" '{session_id: $s}' | PATH=$fake:$PATH "$here/handoff-stop.sh"; }
+stop() { jq -nc --arg s "$1" --argjson a "${2:-false}" '{session_id: $s, stop_hook_active: $a}' | PATH=$fake:$PATH "$here/handoff-stop.sh"; }
 in_tmux() { TMUX=/tmp/x,1,0 TMUX_PANE=%9 "$@"; }
 # handoff <sid> <status> [model]: this window's handoff for session sid
 handoff() {
-  printf -- '---\nsession: %s\nstatus: %s\n---\n## Goal\n' "$1" "$2" > "$hdir/$1.md"
+  printf -- '---\nsession: %s\nstatus: %s\n---\n## Goal\n## Owed to the user\nnone\n' "$1" "$2" > "$hdir/$1.md"
   printf '%s %s %s\n' "$(start_of $$)" "$hdir/$1.md" "${3:-claude-opus-5-5}" > "$state/pid-$$"
 }
 keys() { for _ in $(seq 50); do rg -q 'Continue' "$tmp/keys" 2>/dev/null && break; command sleep 0.1; done; cat "$tmp/keys" 2>/dev/null; }
-reset() { rm -f "$tmp/keys" "$state"/pid-$$*; }
+reset() { rm -f "$tmp/keys" "$tmp/polls" "$tmp/activity" "$state"/pid-$$*; }
 
 reset; handoff t1 continue
 out=$(stop t1 | jq -r .systemMessage)
 [[ $out == *"Type /clear"* ]] && [ ! -e "$tmp/keys" ]; check "stop outside tmux: user types /clear"
+
+reset; handoff t1 continue && sed -i '/^## Owed/,$d' "$hdir/t1.md"
+out=$(in_tmux stop t1)
+[ "$(jq -r .decision <<<"$out")" = block ] && [[ $(jq -r .reason <<<"$out") == *"Owed to the user"* ]] && [ ! -e "$tmp/keys" ]; check "stop, no owed section: blocked once, no clear"
+out=$(in_tmux stop t1 true | jq -r .systemMessage)
+[[ $out == *"cycle 1"* && $(keys) == *Continue* ]]; check "stop, no owed section on retry: no loop, clears"
 
 reset; handoff t1 "done"
 [ -z "$(in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop, status done: nothing"
@@ -172,6 +188,18 @@ send-keys -t %9 Enter
 send-keys -t %9 -l Continue from the handoff.
 send-keys -t %9 Enter" ]; check "stop, continue: types /clear, then the prompt"
 [[ $out == *"cycle 1"* ]] && [ "$(cat "$state/pid-$$.cycles")" = "$(start_of $$) 1" ]; check "stop, continue: cycle counted"
+
+reset; handoff t1 continue
+echo $(( $(date +%s) + 100 )) > "$tmp/activity"   # the user keeps typing
+in_tmux stop t1 > /dev/null
+for _ in $(seq 100); do [ "$(wc -l < "$tmp/polls" 2>/dev/null || echo 0)" -ge 60 ] && break; command sleep 0.1; done
+command sleep 0.2
+[ "$(wc -l < "$tmp/polls" 2>/dev/null)" = 60 ] && [ ! -e "$tmp/keys" ]; check "stop, user typing: helper gives up, types nothing"
+
+reset; handoff t1 continue
+echo $(( $(date +%s) - 5 )) > "$tmp/activity"   # input 5 s ago: quiet
+in_tmux stop t1 > /dev/null
+[[ $(keys) == *"/clear"*"Continue"* ]]; check "stop, user quiet 5 s: types /clear and the prompt"
 
 rm -f "$tmp/keys"; handoff t1 continue
 [ -z "$(in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop again before /clear: no second trigger"
