@@ -14,14 +14,15 @@ a small accuracy loss. Native auto-compaction stays on as the last fallback.
 
 | Item | Decision |
 |---|---|
-| Limits, all models except Haiku | warn 135k, hard 150k |
-| Limits, model id contains `haiku` | warn 85k, hard 100k (above 100k the user's Haiku usage costs about 3x) |
+| Limits, all models except Haiku | warn 135k, stop 145k (revised from hard 150k) |
+| Limits, model id contains `haiku` | warn 85k, stop 95k (revised from hard 100k; above 100k the user's Haiku usage costs about 3x) |
 | Native fallback | `autoCompactWindow` 203000 (start about 170k), Haiku 148000 (start about 115k) |
 | Triggers | UserPromptSubmit and PostToolUse (tool loops grow context with no user prompt) |
-| Messages | warn once; hard limit: full message once, then a one-line reminder on each later prompt until this session's handoff exists |
+| Messages | warn once with the template: write the handoff at the next checkpoint; stop limit once: stop now, write it at once; then a one-line reminder on each later prompt until this session's handoff exists |
 | Handoff file | `~/.claude/handoffs/<cwd-slug>/<session-id>.md` |
 | Injection | only the handoff bound to this window (PID + process start time), at most 2 h old; renamed to `<session-id>.used.md` after use |
-| Gap after the handoff | the inject hook appends a mechanical tail of the old transcript (no model call) |
+| Gap after the handoff | none: the handoff is the last action; the header gives the old transcript path (revised: the mechanical tail is removed) |
+| Automatic clear | `status: continue` in the handoff: in tmux, the Stop hook types `/clear` and a continue prompt; Haiku no limit, other models 5 per window; outside tmux the user types `/clear` |
 | Headless sessions | all hooks do nothing unless `CLAUDE_CODE_SESSION_ATTENDED=1` |
 | Code home | this fork; `~/.claude/settings.json` points at the scripts here; no copy in `~/.claude/hooks` |
 | Review | reminder to review real sessions on or after 2026-10-29 |
@@ -66,14 +67,15 @@ created: <ISO time>
 ## Next step       exact next action, stop condition, open questions
 ```
 
-Limit: about 800 words. Omit empty sections. Keep paths, commands and errors verbatim.
+Limit: about 2000 words (revised from 800). Front matter also has `status: continue | done`. Omit empty sections. Keep paths, commands and errors verbatim.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `handoff/handoff-nudge.sh` | UserPromptSubmit and PostToolUse hook: measure tokens, inject warn, hard and reminder messages |
-| `handoff/handoff-inject.sh` | SessionStart(clear) hook: inject this window's handoff plus the transcript tail |
+| `handoff/handoff-inject.sh` | SessionStart(clear) hook: inject this window's handoff and the old transcript path |
+| `handoff/handoff-stop.sh` | Stop hook: on `status: continue`, type `/clear` and a continue prompt in tmux |
 | `handoff/test.sh` | fixture tests for both scripts (no model calls) |
 | `handoff/README.md` | what the hooks do, wiring, limits |
 | `docs/handoff-review-2026-10-29.md` | review checklist for the reminder |
@@ -104,13 +106,19 @@ tests after the change.
 
 - PostToolUse runs after every tool call: the script reads at most the last 4 MB of the transcript
   with one `jq` pass.
-- A deliberate run past the hard limit gets one-line reminders until about 170k, then native
+- A deliberate run past the stop limit gets one-line reminders until about 170k, then native
   compaction runs.
 - Revised 2026-10-15 after user review: the first version loaded the newest handoff in the folder.
   The user sometimes runs two windows in one folder, so a `/clear` in one window could load
   another window's handoff. Now a handoff is bound to the window that wrote it (`CLAUDE_PID` and
   process start time). A real two-window tmux test showed that the PID stays the same after
   `/clear` and that only the bound window loads the handoff.
+
+- Revised 2026-10-15, second user review: the user wants long tasks to run without typing `/clear`.
+  Hooks cannot run slash commands, and the kernel blocks typing into a terminal (`legacy_tiocsti` 0).
+  The user chose tmux over a restart wrapper. A real tmux test showed the cycle: reply, `/clear`,
+  continue prompt, the new session follows the handoff. Risks: keys can mix with user typing, and the
+  new session may not get notifications from background tasks of the old one.
 
 ## Retirement
 

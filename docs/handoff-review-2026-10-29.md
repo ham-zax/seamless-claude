@@ -5,12 +5,12 @@ limits or the handoff format, or remove the hooks.
 
 ## Questions
 
-1. Did Claude obey the messages? Hard message → handoff file written → user told to type `/clear`.
+1. Did Claude obey the messages? Warn or stop message → handoff written at a checkpoint → turn ended → `/clear`.
 2. Did the new session continue well from the handoff? Count re-explanations and repeated dead ends.
-3. Did native compaction still run? Each compaction above the hard limit is a missed handoff.
-4. Size: tokens at the hard message, at the handoff write, and at the first reply after `/clear`.
-5. Did the warn tier start too late or too early? Did work run past the hard limit for long?
-6. Was the transcript tail useful, or only noise?
+3. Did native compaction still run? Each compaction above the stop limit is a missed handoff.
+4. Size: tokens at the stop message, at the handoff write, and at the first reply after `/clear`.
+5. Did the warn tier start too late or too early? Did work run past the stop limit for long?
+6. Automatic clears (tmux): did each cycle continue the task? Did `status: done` stop at the right time? Did keys mix with your typing?
 
 ## Data
 
@@ -22,7 +22,7 @@ since=2026-10-15
 rg -l --glob '*.jsonl' '\[handoff\] Context is at' . | while read -r f; do
   [[ $(stat -c %y "$f") > $since ]] || continue
   printf '%s warn=%s hard=%s\n' "$f" \
-    "$(rg -c 'Do not write the handoff yet' "$f")" "$(rg -c 'Write the handoff to|write the handoff to' "$f")"
+    "$(rg -c 'At the checkpoint, write the handoff' "$f")" "$(rg -c 'Stop now' "$f")"
 done
 
 # Handoffs written and used
