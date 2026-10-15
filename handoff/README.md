@@ -1,9 +1,10 @@
 # Handoff hooks
 
-A lean alternative to the seamless-claude plugin. Near a per-model token limit, Claude writes a
-short handoff file at a checkpoint and ends its turn. In tmux, a hook then clears the session and
-continues from the handoff without you. Outside tmux, you type `/clear`. Native auto-compaction stays
-on as the last fallback. There is no background model call.
+A lean alternative to the seamless-claude plugin. In tmux, near a per-model token limit, Claude
+writes a short handoff file at a checkpoint and ends its turn. A hook then clears the session and
+continues from the handoff without you. Outside tmux, the hooks send no messages and native
+auto-compaction handles a full context. Native auto-compaction also stays on in tmux as the last
+fallback. There is no background model call.
 
 ## Flow
 
@@ -34,7 +35,8 @@ stays on disk: tell the new session to read it.
 
 `<cwd-slug>` is the working directory with every non-alphanumeric character replaced by `-`.
 All hooks do nothing unless `CLAUDE_CODE_SESSION_ATTENDED=1`, so `claude -p`, SDK runs and workers
-are not affected.
+are not affected. `handoff-nudge.sh` also does nothing unless `$TMUX` and `$TMUX_PANE` are set, so
+outside tmux no handoff starts and native auto-compaction runs.
 
 ## Limits
 

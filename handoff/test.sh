@@ -28,9 +28,9 @@ transcript() {
   [ -z "${4:-}" ] || echo "$4" >> "$1"
 }
 
-nudge() {   # event sid transcript
+nudge() {   # event sid transcript; runs in tmux unless TMUX is set empty
   jq -nc --arg e "$1" --arg s "$2" --arg t "$3" --arg c "$cwd" \
-    '{hook_event_name: $e, session_id: $s, transcript_path: $t, cwd: $c}' | "$here/handoff-nudge.sh"
+    '{hook_event_name: $e, session_id: $s, transcript_path: $t, cwd: $c}' | TMUX=${TMUX-/tmp/x,1,0} TMUX_PANE=%9 "$here/handoff-nudge.sh"
 }
 
 ctx() { jq -r '.hookSpecificOutput.additionalContext // empty'; }
@@ -43,7 +43,6 @@ transcript "$proj/s1.jsonl" 120000
 transcript "$proj/s1.jsonl" 136000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *136k*"At the checkpoint, write the handoff to: $hdir/s1.md"*"status: continue | done"*"## Next step"* ]]; check "warn: checkpoint message with template"
-[[ $out == *"tell the user to type /clear"* ]]; check "warn: outside tmux, user types /clear"
 [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: handoff bound to this window"
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "warn: not repeated"
 
@@ -85,8 +84,12 @@ transcript "$proj/s7.jsonl" 160000
 for _ in 1 2 3 4 5 6 7 8; do nudge PostToolUse s7 "$proj/s7.jsonl" > "$tmp/par.$RANDOM$RANDOM" & done; wait
 [ "$(cat "$tmp"/par.* | rg -c 'Stop now')" = 1 ]; check "parallel hooks: one hard message"
 
-transcript "$proj/s8.jsonl" 136000
-out=$(TMUX=/tmp/x,1,0 TMUX_PANE=%9 nudge UserPromptSubmit s8 "$proj/s8.jsonl" | ctx)
+transcript "$proj/s8.jsonl" 160000
+out=$(TMUX='' nudge UserPromptSubmit s8 "$proj/s8.jsonl")
+[ -z "$out" ] && [ -z "$(find "$state" -name 's8*')" ]; check "outside tmux: silent, no state"
+
+transcript "$proj/s9.jsonl" 136000
+out=$(nudge UserPromptSubmit s9 "$proj/s9.jsonl" | ctx)
 [[ $out == *"A hook then clears the session"* ]]; check "warn: in tmux, hook clears"
 
 # --- inject ---

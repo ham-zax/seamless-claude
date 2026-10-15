@@ -7,6 +7,8 @@
 #
 # Headless runs (claude -p, SDK, workers) have nobody to type /clear: skip them.
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ] || exit 0
+# Outside tmux nothing can clear the session automatically: native auto-compaction handles it.
+[ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || exit 0
 set -u
 
 input=$(cat)
@@ -44,11 +46,7 @@ bind() {
   start=$(sed 's/.*) //' "/proc/${CLAUDE_PID:-x}/stat" 2>/dev/null | cut -d' ' -f20)
   [ -n "$start" ] && printf '%s %s %s\n' "$start" "$file" "$model" > "$state/pid-$CLAUDE_PID"
 }
-if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
-  after="A hook then clears the session and continues from the handoff in a new session."
-else
-  after="Then tell the user to type /clear. A hook loads the handoff into the new session."
-fi
+after="A hook then clears the session and continues from the handoff in a new session."
 
 template="The handoff replaces this whole conversation for the next session. Keep only what is expensive or impossible to rebuild from git and the repository. Rules: about 2000 words at most. Omit empty sections. Keep paths, commands, IDs and error messages verbatim. Give pointers (file:line, command) instead of file contents. Do not list modified files: git shows them.
 status: write continue if work remains that you can do without the user. Write done if the request is complete and verified, or the next step needs the user.
