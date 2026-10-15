@@ -11,20 +11,24 @@ fallback. There is no background model call.
 1. `handoff-nudge.sh` (UserPromptSubmit and PostToolUse) reads the context size from the transcript:
    `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` of the last main-chain
    assistant entry.
-2. At the warn limit it injects one message with the template: at the next checkpoint (a finished,
-   verified step), write the handoff to `~/.claude/handoffs/<cwd-slug>/<session-id>.md` as the last
+2. At the warn limit it injects one heads-up message with the template: continue the work, plan a
+   checkpoint (a finished, verified step) within about 10k tokens, and do not start a sub-task that
+   cannot finish before it. At the checkpoint, write the handoff to `~/.claude/handoffs/<cwd-slug>/<session-id>.md` as the last
    action and end the turn. A handoff never replaces a reply: Claude answers a short user question in
    visible text first, else lists it under `## Owed to the user`. The hook also binds the handoff to
    this Claude window: `CLAUDE_PID`, the process start time and the model.
 3. At the stop limit it injects one message: stop now, let background jobs run, write the handoff at
-   once. Each later prompt gets a one-line reminder until the file exists.
+   once. Each later prompt and tool result gets a one-line reminder until the file exists. Native
+   auto-compaction is the last fallback.
 4. Every handoff has a `## Owed to the user` section: each question the user has not seen answered,
    or `none`. The front matter has `status: continue` (work remains that needs no user decision) or
    `status: done`.
 5. `handoff-stop.sh` (Stop) blocks the stop once if this session's handoff has no
-   `## Owed to the user` section. Then it acts when the handoff has `status: continue`:
+   `## Owed to the user` section. Then it clears after every handoff, so no turn runs after it. With
+   `status: continue` it also types a continue prompt. With `status: done` the new session waits for
+   you:
    - in tmux, a detached helper types `/clear` into this pane, waits until the handoff is loaded,
-     then types `Continue from the handoff.`. It types only after 2 s without your input
+     then types `Continue from the handoff.` (only for `continue`). It types only after 2 s without your input
      (tmux `client_activity`) and gives up after 30 s of typing;
    - outside tmux, or after the automatic clear limit, it tells you to type `/clear`.
 6. `handoff-inject.sh` (SessionStart, matcher `clear`) loads the handoff bound to this window, if the
@@ -49,7 +53,7 @@ outside tmux no handoff starts and native auto-compaction runs.
 | Model | Warn (checkpoint) | Stop now | Automatic clears per window | Native compaction starts |
 |---|---|---|---|---|
 | model id contains `haiku` | 85k | 95k | no limit | about 115k (`autoCompactWindow` 148000) |
-| all other models | 135k | 145k | 5 | about 170k (`autoCompactWindow` 203000) |
+| all other models | 140k | 150k | 5 | about 165k (`autoCompactWindow` 198000) |
 
 Native compaction starts at `autoCompactWindow` − 33k (the autocompact buffer that `/context`
 shows). Keep it above the stop limit, or compaction runs before the handoff. A `/clear` that you type
@@ -59,7 +63,7 @@ resets the automatic clear count.
 
 ```json
 {
-  "autoCompactWindow": 203000,
+  "autoCompactWindow": 198000,
   "modelSettings": { "claude-haiku-5-5": { "autoCompactWindow": 148000 } },
   "hooks": {
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOME/repo/seamless-claude/handoff/handoff-nudge.sh" }] }],

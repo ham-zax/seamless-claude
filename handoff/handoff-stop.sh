@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Stop hook: when Claude ends a turn after it wrote this session's handoff with "status: continue",
-# starts the next session without the user. A hook cannot run /clear, so a detached helper types
+# Stop hook: when Claude ends a turn after it wrote this session's handoff, starts the next session
+# without the user. With "status: continue" it also types a prompt to continue. With "status: done"
+# the new session waits for the user. Clearing after every handoff keeps it current: no turn runs
+# after it. A hook cannot run /clear, so a detached helper types
 # /clear into this tmux pane, waits for handoff-inject.sh to load the handoff, then types a prompt
 # to continue. Outside tmux, or after the automatic clear limit, the user types /clear.
 #
@@ -23,7 +25,11 @@ if [ "$active" != true ] && ! grep -q '^## Owed to the user' "$file"; then
   exit 0
 fi
 status=$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } $1 == "status:" { print $2; exit }' "$file")
-[ "$status" = continue ] || exit 0
+case $status in
+  continue) prompt="Continue from the handoff." ;;
+  done)     prompt="" ;;
+  *)        exit 0 ;;
+esac
 
 say() { jq -n --arg m "[handoff] $1" '{systemMessage: $m}'; }
 if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
@@ -69,8 +75,10 @@ setsid -f bash -c '
   tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || exit 0
   for _ in $(seq 60); do [ -e "$2" ] || break; sleep 0.5; done
   [ -e "$2" ] && exit 0
+  [ -n "$3" ] || exit 0
   sleep 1
   quiet "$1" || exit 0
-  tmux send-keys -t "$1" -l "Continue from the handoff." && tmux send-keys -t "$1" Enter
-' handoff-clear "$TMUX_PANE" "$rec" < /dev/null > /dev/null 2>&1
-say "Handoff written. Clearing and continuing in a new session (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear."
+  tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter
+' handoff-clear "$TMUX_PANE" "$rec" "$prompt" < /dev/null > /dev/null 2>&1
+if [ -n "$prompt" ]; then next="continuing in a new session"; else next="the new session waits for you"; fi
+say "Handoff written. Clearing, $next (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear."

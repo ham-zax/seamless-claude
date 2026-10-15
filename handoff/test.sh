@@ -40,20 +40,21 @@ start_of() { sed 's/.*) //' "/proc/$1/stat" | cut -d' ' -f20; }
 transcript "$proj/s1.jsonl" 120000
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "below warn: no output"
 
-transcript "$proj/s1.jsonl" 136000
+transcript "$proj/s1.jsonl" 141000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
-[[ $out == *136k*"At the checkpoint, write the handoff to: $hdir/s1.md"*"status: continue | done"*"## Next step"* ]]; check "warn: checkpoint message with template"
+[[ $out == *141k*"We start a new session soon"*"Plan a checkpoint within about 10k tokens"*"At the checkpoint, write the handoff to: $hdir/s1.md"*"status: continue | done"*"## Next step"* ]]; check "warn: checkpoint message with template"
 [[ $out == *"never replaces a reply"*"## Owed to the user"*"Always include this section"* ]]; check "warn: reply owed before handoff"
 [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: handoff bound to this window"
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "warn: not repeated"
 
-transcript "$proj/s1.jsonl" 146000
+transcript "$proj/s1.jsonl" 151000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *"Stop now"*"$hdir/s1.md"* && $out != *"## Next step"* ]]; check "hard: stop message, template not repeated"
 [[ $out == *"under ## Owed to the user"* ]]; check "hard: unanswered questions listed as owed"
-[ -z "$(nudge PostToolUse s1 "$proj/s1.jsonl")" ]; check "hard: PostToolUse silent after"
+out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
+[[ $out == *"above the 150k"* && $(wc -l <<<"$out") == 1 ]]; check "hard: one-line reminder on tool result"
 out=$(nudge UserPromptSubmit s1 "$proj/s1.jsonl" | ctx)
-[[ $out == *"above the 145k"* && $(wc -l <<<"$out") == 1 ]]; check "hard: one-line reminder on prompt"
+[[ $out == *"above the 150k"* && $(wc -l <<<"$out") == 1 ]]; check "hard: one-line reminder on prompt"
 ev=$(nudge UserPromptSubmit s1 "$proj/s1.jsonl" | jq -r .hookSpecificOutput.hookEventName)
 [ "$ev" = UserPromptSubmit ]; check "hard: event name echoed"
 
@@ -90,7 +91,7 @@ transcript "$proj/s8.jsonl" 160000
 out=$(TMUX='' nudge UserPromptSubmit s8 "$proj/s8.jsonl")
 [ -z "$out" ] && [ -z "$(find "$state" -name 's8*')" ]; check "outside tmux: silent, no state"
 
-transcript "$proj/s9.jsonl" 136000
+transcript "$proj/s9.jsonl" 141000
 out=$(nudge UserPromptSubmit s9 "$proj/s9.jsonl" | ctx)
 [[ $out == *"A hook then clears the session"* ]]; check "warn: in tmux, hook clears"
 
@@ -176,7 +177,11 @@ out=$(in_tmux stop t1 true | jq -r .systemMessage)
 [[ $out == *"cycle 1"* && $(keys) == *Continue* ]]; check "stop, no owed section on retry: no loop, clears"
 
 reset; handoff t1 "done"
-[ -z "$(in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop, status done: nothing"
+out=$(in_tmux stop t1 | jq -r .systemMessage)
+for _ in $(seq 50); do [ -e "$state/pid-$$" ] || break; command sleep 0.1; done
+command sleep 0.3
+[[ $out == *"the new session waits for you"* ]] && [ "$(cat "$tmp/keys")" = "send-keys -t %9 -l /clear
+send-keys -t %9 Enter" ]; check "stop, status done: clears, types no prompt"
 
 reset; handoff t1 continue
 [ -z "$(in_tmux stop t2)" ] && [ ! -e "$tmp/keys" ]; check "stop, other session's handoff: nothing"

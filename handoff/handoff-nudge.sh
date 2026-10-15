@@ -27,7 +27,7 @@ read -r tokens model < <(tail -c 4000000 "$tp" | jq -Rr '
 
 case $model in
   *haiku*) warn=85000 hard=95000 ;;    # Haiku usage costs about 3x above 100k
-  *)       warn=135000 hard=145000 ;;
+  *)       warn=140000 hard=150000 ;;   # native compaction (autoCompactWindow 198000) starts near 165k
 esac
 (( tokens >= warn )) || exit 0
 
@@ -80,8 +80,8 @@ The exact next action and its stop condition. Open questions for the user."
 if (( tokens < hard )); then
   mark warn || exit 0
   bind
-  msg="[handoff] Context is at ${k}k tokens. At ${h}k a [handoff] message tells you to stop at once.
-Reach a checkpoint before then: finish and verify the current step. Do not start large new work.
+  msg="[handoff] Context is at ${k}k tokens. We start a new session soon. At ${h}k a [handoff] message tells you to stop at once.
+Continue your work. Plan a checkpoint within about 10k tokens: a finished, verified step. Do not start a sub-task that you cannot finish before it.
 $owed
 At the checkpoint, write the handoff to: $file
 Make it your last action and end your turn. $after
@@ -95,10 +95,9 @@ Let background jobs run. Move a long foreground command to the background. List 
   mark warn && msg+="
 
 $template"
-elif [ "$event" = UserPromptSubmit ]; then
-  msg="[handoff] Context is at ${k}k tokens, above the ${h}k stop limit. Write the handoff to $file now as the earlier [handoff] message describes, then end your turn."
 else
-  exit 0   # PostToolUse: the reminder waits for the next user prompt
+  # Every prompt and tool result until the file exists. Native compaction is the fallback.
+  msg="[handoff] Context is at ${k}k tokens, above the ${h}k stop limit. Write the handoff to $file now as the earlier [handoff] message describes, then end your turn."
 fi
 
 jq -n --arg e "$event" --arg m "$msg" '{hookSpecificOutput: {hookEventName: $e, additionalContext: $m}}'
