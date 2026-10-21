@@ -26,7 +26,7 @@ read -r tokens model < <(tail -c 4000000 "$tp" | jq -Rr '
 [[ ${tokens:-} =~ ^[0-9]+$ ]] || exit 0
 
 case $model in
-  *haiku*) warn=85000 hard=95000 ;;    # Haiku usage costs about 3x above 100k
+  *haiku*) warn=90000 hard=100000 ;;   # native compaction (autoCompactWindow 148000) starts near 115k
   *)       warn=140000 hard=150000 ;;   # native compaction (autoCompactWindow 198000) starts near 165k
 esac
 (( tokens >= warn )) || exit 0

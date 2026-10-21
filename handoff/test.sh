@@ -70,12 +70,12 @@ transcript "$proj/s3.jsonl" 160000 claude-opus-5-5 \
 out=$(nudge UserPromptSubmit s3 "$proj/s3.jsonl" | ctx)
 [[ $out == *160k*"Stop now"*"## Next step"* ]]; check "sidechain ignored; jump past warn: stop message with template"
 
-transcript "$proj/s4.jsonl" 90000 claude-haiku-5-5
+transcript "$proj/s4.jsonl" 95000 claude-haiku-5-5
 out=$(nudge UserPromptSubmit s4 "$proj/s4.jsonl" | ctx)
-[[ $out == *"At 95k"* ]]; check "haiku: warn at 90k"
-transcript "$proj/s4.jsonl" 96000 claude-haiku-5-5
+[[ $out == *"At 100k"* ]]; check "haiku: warn at 95k"
+transcript "$proj/s4.jsonl" 101000 claude-haiku-5-5
 out=$(nudge PostToolUse s4 "$proj/s4.jsonl" | ctx)
-[[ $out == *"95k stop limit"* ]]; check "haiku: stop at 96k"
+[[ $out == *"100k stop limit"* ]]; check "haiku: stop at 101k"
 transcript "$proj/s5.jsonl" 90000 claude-sonnet-5-5
 [ -z "$(nudge UserPromptSubmit s5 "$proj/s5.jsonl")" ]; check "sonnet: silent at 90k"
 
@@ -148,8 +148,8 @@ inject > /dev/null
 
 # --- stop ---
 # A fake tmux logs the keys. Its first Enter (after /clear) removes the binding, as handoff-inject.sh
-# does. Its list-clients logs each poll and prints $tmp/activity (last client input, epoch s) if it
-# exists. A fake sleep makes the detached helper fast. Both are on PATH for the hook only.
+# does. Its list-clients logs each poll and prints $tmp/activity ("<last client input, epoch s>
+# <client's current pane>") if it exists. A fake sleep makes the detached helper fast. Both are on PATH for the hook only.
 fake=$tmp/fake && mkdir -p "$fake"
 # shellcheck disable=SC2016  # the fake script expands its own arguments
 printf '#!/bin/sh\nif [ "$1" = list-clients ]; then echo >> "%s/polls"; cat "%s/activity" 2>/dev/null; exit 0; fi\necho "$*" >> "%s/keys"\n[ "$*" = "send-keys -t %%9 Enter" ] && rm -f "%s/pid-%s"\nexit 0\n' \
@@ -164,7 +164,7 @@ handoff() {
   printf '%s %s %s\n' "$(start_of $$)" "$hdir/$1.md" "${3:-claude-opus-5-5}" > "$state/pid-$$"
 }
 keys() { for _ in $(seq 50); do rg -q 'Continue' "$tmp/keys" 2>/dev/null && break; command sleep 0.1; done; cat "$tmp/keys" 2>/dev/null; }
-reset() { rm -f "$tmp/keys" "$tmp/polls" "$tmp/activity" "$state"/pid-$$*; }
+reset() { rm -f "$tmp/keys" "$tmp/polls" "$tmp/activity" "$state/clear.log" "$state"/pid-$$*; }
 
 reset; handoff t1 continue
 out=$(stop t1 | jq -r .systemMessage)
@@ -195,14 +195,20 @@ send-keys -t %9 Enter" ]; check "stop, continue: types /clear, then the prompt"
 [[ $out == *"cycle 1"* ]] && [ "$(cat "$state/pid-$$.cycles")" = "$(start_of $$) 1" ]; check "stop, continue: cycle counted"
 
 reset; handoff t1 continue
-echo $(( $(date +%s) + 100 )) > "$tmp/activity"   # the user keeps typing
+echo "$(( $(date +%s) + 100 )) %9" > "$tmp/activity"   # the user keeps typing in this pane
 in_tmux stop t1 > /dev/null
 for _ in $(seq 100); do [ "$(wc -l < "$tmp/polls" 2>/dev/null || echo 0)" -ge 60 ] && break; command sleep 0.1; done
-command sleep 0.2
+for _ in $(seq 50); do [ -s "$state/clear.log" ] && break; command sleep 0.1; done
 [ "$(wc -l < "$tmp/polls" 2>/dev/null)" = 60 ] && [ ! -e "$tmp/keys" ]; check "stop, user typing: helper gives up, types nothing"
+rg -q "pane %9 pid $$: input for 30 s, /clear not typed" "$state/clear.log"; check "stop, user typing: give-up logged"
 
 reset; handoff t1 continue
-echo $(( $(date +%s) - 5 )) > "$tmp/activity"   # input 5 s ago: quiet
+echo "$(( $(date +%s) + 100 )) %3" > "$tmp/activity"   # the user types in another pane
+in_tmux stop t1 > /dev/null
+[[ $(keys) == *"/clear"*"Continue"* ]]; check "stop, input in another pane: types /clear and the prompt"
+
+reset; handoff t1 continue
+echo "$(( $(date +%s) - 5 )) %9" > "$tmp/activity"   # input 5 s ago: quiet
 in_tmux stop t1 > /dev/null
 [[ $(keys) == *"/clear"*"Continue"* ]]; check "stop, user quiet 5 s: types /clear and the prompt"
 
@@ -210,9 +216,9 @@ rm -f "$tmp/keys"; handoff t1 continue
 [ -z "$(in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop again before /clear: no second trigger"
 
 reset; handoff t1 continue
-cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 5"
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 7"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
-[[ $out == *"5 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, opus limit 5: user types /clear"
+[[ $out == *"7 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, opus limit 7: user types /clear"
 
 reset; handoff t1 continue claude-haiku-5-5
 cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 40"

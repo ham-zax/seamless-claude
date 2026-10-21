@@ -38,7 +38,7 @@ if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
 fi
 case $model in
   *haiku*) max=0 ;;   # no limit
-  *)       max=5 ;;
+  *)       max=7 ;;
 esac
 cycles=$state/pid-$CLAUDE_PID.cycles
 n=0
@@ -57,28 +57,32 @@ printf '%s %s\n' "$start" $((n + 1)) > "$cycles"
 
 # The helper owns the rest of the cycle and ends within about 95 s. It types only after Claude is
 # idle, and the prompt only after the /clear removed the binding. Keys typed while the user types
-# would mix with the user's keys: it types only after 2 s without client input (tmux
-# client_activity), and gives up after 30 s of activity.
+# would mix with the user's keys: it types only after 2 s without input from a tmux client that shows
+# this pane (client_activity of clients whose current pane is this pane), and gives up after 30 s of
+# activity. Input in other panes or windows does not count. Each give-up appends one line to
+# clear.log in the state directory.
 # shellcheck disable=SC2016  # the helper expands its own arguments
 setsid -f bash -c '
   quiet() {
     local last
     for _ in $(seq 60); do
-      last=$(tmux list-clients -t "$1" -F "#{client_activity}" 2>/dev/null | sort -n | tail -n 1)
+      last=$(tmux list-clients -t "$1" -F "#{client_activity} #{pane_id}" 2>/dev/null |
+        awk -v p="$1" '"'"'$2 == p { print $1 }'"'"' | sort -n | tail -n 1)
       [ -z "$last" ] || (( $(date +%s) - last >= 2 )) && return 0
       sleep 0.5
     done
     return 1
   }
+  give_up() { printf "%s pane %s pid %s: %s\n" "$(date "+%F %T")" "$1" "$5" "$6" >> "$4"; exit 0; }
   sleep 2
-  quiet "$1" || exit 0
-  tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || exit 0
+  quiet "$1" || give_up "$@" "input for 30 s, /clear not typed"
+  tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys /clear failed"
   for _ in $(seq 60); do [ -e "$2" ] || break; sleep 0.5; done
-  [ -e "$2" ] && exit 0
+  [ -e "$2" ] && give_up "$@" "handoff not loaded 30 s after /clear"
   [ -n "$3" ] || exit 0
   sleep 1
-  quiet "$1" || exit 0
-  tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter
-' handoff-clear "$TMUX_PANE" "$rec" "$prompt" < /dev/null > /dev/null 2>&1
+  quiet "$1" || give_up "$@" "input for 30 s, prompt not typed"
+  tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys prompt failed"
+' handoff-clear "$TMUX_PANE" "$rec" "$prompt" "$state/clear.log" "$CLAUDE_PID" < /dev/null > /dev/null 2>&1
 if [ -n "$prompt" ]; then next="continuing in a new session"; else next="the new session waits for you"; fi
 say "Handoff written. Clearing, $next (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear."

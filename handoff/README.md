@@ -29,7 +29,9 @@ fallback. There is no background model call.
    you:
    - in tmux, a detached helper types `/clear` into this pane, waits until the handoff is loaded,
      then types `Continue from the handoff.` (only for `continue`). It types only after 2 s without your input
-     (tmux `client_activity`) and gives up after 30 s of typing;
+     in this pane (tmux `client_activity` of clients that show this pane), and gives up after 30 s
+     of typing. Input in other panes does not count. Each give-up appends a line to
+     `~/.claude/handoffs/.state/clear.log`;
    - outside tmux, or after the automatic clear limit, it tells you to type `/clear`.
 6. `handoff-inject.sh` (SessionStart, matcher `clear`) loads the handoff bound to this window, if the
    file exists and is less than 2 h old, and renames it to `<session-id>.used.md`. The header gives
@@ -52,8 +54,8 @@ outside tmux no handoff starts and native auto-compaction runs.
 
 | Model | Warn (checkpoint) | Stop now | Automatic clears per window | Native compaction starts |
 |---|---|---|---|---|
-| model id contains `haiku` | 85k | 95k | no limit | about 115k (`autoCompactWindow` 148000) |
-| all other models | 140k | 150k | 5 | about 165k (`autoCompactWindow` 198000) |
+| model id contains `haiku` | 90k | 100k | no limit | about 115k (`autoCompactWindow` 148000) |
+| all other models | 140k | 150k | 7 | about 165k (`autoCompactWindow` 198000) |
 
 Native compaction starts at `autoCompactWindow` − 33k (the autocompact buffer that `/context`
 shows). Keep it above the stop limit, or compaction runs before the handoff. A `/clear` that you type
