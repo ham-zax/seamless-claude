@@ -10,12 +10,13 @@
 [ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ] || exit 0
 set -u
 
-IFS=$'\t' read -r sid active < <(jq -r '[.session_id, (.stop_hook_active // false)] | @tsv' 2>/dev/null)
+input=$(cat)
+IFS=$'\t' read -r sid active < <(jq -r '[.session_id, (.stop_hook_active // false)] | @tsv' <<<"$input" 2>/dev/null)
 [[ $sid =~ ^[A-Za-z0-9-]+$ ]] || exit 0
 state=$HOME/.claude/handoffs/.state
 rec=$state/pid-${CLAUDE_PID:-x}
 [ -f "$rec" ] || exit 0
-read -r start file model < "$rec"
+read -r start file _ < "$rec"
 [ "$start" = "$(sed 's/.*) //' "/proc/$CLAUDE_PID/stat" 2>/dev/null | cut -d' ' -f20)" ] || exit 0  # PID reused
 [ "${file##*/}" = "$sid.md" ] && [ -f "$file" ] || exit 0   # this session's handoff, not yet loaded
 # The section makes Claude check what the user has not seen yet. Block once: stop_hook_active is set
@@ -31,22 +32,42 @@ case $status in
   *)        exit 0 ;;
 esac
 
+# Hook-owned record at the end of the handoff, replaced on every Stop until the /clear: the final
+# visible reply (written after the handoff, so the handoff cannot hold it) and the transcripts of the
+# sessions before this one (handoff-inject.sh keeps the list in <session-id>.chain). Pointers only:
+# the next session reads a transcript when it needs a detail.
+marker='<!-- handoff-stop.sh: record below, replaced on every Stop -->'
+reply=$(jq -r '.last_assistant_message // empty' <<<"$input")
+max_reply=6000
+(( ${#reply} <= max_reply )) || reply="${reply:0:max_reply}
+[handoff] Cut at $max_reply characters. The full reply is the last assistant message in the old transcript."
+{
+  awk -v m="$marker" '$0 == m { exit } { print }' "$file"
+  printf '%s\n' "$marker"
+  if [ -n "$reply" ]; then
+    printf '## Last reply to the user\nThe old session gave this reply after it wrote the handoff. The user saw it before the /clear.\n\n%s\n' "$reply"
+  fi
+  if [ -s "$state/$sid.chain" ]; then
+    printf '## Earlier transcripts\nSessions before the old session, newest first:\n'
+    sed 's/^/- /' "$state/$sid.chain"
+  fi
+} > "$file.tmp" && mv "$file.tmp" "$file"
+
 say() { jq -n --arg m "[handoff] $1" '{systemMessage: $m}'; }
 if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
   say "Handoff written. Type /clear to continue in a new session."
   exit 0
 fi
-case $model in
-  *haiku*) max=0 ;;   # no limit
-  *)       max=7 ;;
-esac
+# Every model: after max automatic clears the hook pauses once. The user's /clear resets the count
+# (handoff-inject.sh), and the next max clears run automatically again.
+max=7
 cycles=$state/pid-$CLAUDE_PID.cycles
 n=0
 if [ -f "$cycles" ]; then
   read -r cstart cn < "$cycles"
   [ "$cstart" = "$start" ] && [[ $cn =~ ^[0-9]+$ ]] && n=$cn
 fi
-if (( max && n >= max )); then
+if (( n >= max )); then
   say "$max automatic clears in this window. Type /clear to continue in a new session."
   exit 0
 fi
@@ -73,16 +94,25 @@ setsid -f bash -c '
     done
     return 1
   }
+  # An unsent draft would turn "/clear" into "draft/clear". Esc Esc clears the input box (C-l does
+  # not, Claude Code 2.1.307). The typed x keeps the box non-empty: Esc Esc on an empty box opens
+  # Rewind. The second round covers an open @-mention menu, where the first Esc only closes the menu.
+  clr() {
+    for _ in 1 2; do
+      tmux send-keys -t "$1" -l x && tmux send-keys -t "$1" Escape Escape || return 1
+      sleep 0.3
+    done
+  }
   give_up() { printf "%s pane %s pid %s: %s\n" "$(date "+%F %T")" "$1" "$5" "$6" >> "$4"; exit 0; }
   sleep 2
   quiet "$1" || give_up "$@" "input for 30 s, /clear not typed"
-  tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys /clear failed"
+  clr "$1" && tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys /clear failed"
   for _ in $(seq 60); do [ -e "$2" ] || break; sleep 0.5; done
   [ -e "$2" ] && give_up "$@" "handoff not loaded 30 s after /clear"
   [ -n "$3" ] || exit 0
   sleep 1
   quiet "$1" || give_up "$@" "input for 30 s, prompt not typed"
-  tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys prompt failed"
+  clr "$1" && tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys prompt failed"
 ' handoff-clear "$TMUX_PANE" "$rec" "$prompt" "$state/clear.log" "$CLAUDE_PID" < /dev/null > /dev/null 2>&1
 if [ -n "$prompt" ]; then next="continuing in a new session"; else next="the new session waits for you"; fi
-say "Handoff written. Clearing, $next (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear."
+say "Handoff written. Clearing, $next (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear. The hook deletes unsent text in the input box before it types."

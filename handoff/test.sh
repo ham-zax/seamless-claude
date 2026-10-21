@@ -96,7 +96,7 @@ out=$(nudge UserPromptSubmit s9 "$proj/s9.jsonl" | ctx)
 [[ $out == *"A hook then clears the session"* ]]; check "warn: in tmux, hook clears"
 
 # --- inject ---
-inject() { jq -nc --arg t "$proj/new.jsonl" '{transcript_path: $t, source: "clear"}' | "$here/handoff-inject.sh"; }
+inject() { jq -nc --arg t "$proj/new.jsonl" '{transcript_path: $t, session_id: "new", source: "clear"}' | "$here/handoff-inject.sh"; }
 bind() { printf '%s %s\n' "${2:-$(start_of $$)}" "$hdir/$1.md" > "$state/pid-$$"; }   # name [start]
 
 rm -rf "$hdir" "$state" && mkdir -p "$hdir" "$state"
@@ -121,6 +121,18 @@ out=$(inject | ctx)
 [[ $out == *"Re-check a claim before you build on it"* && $out != *"Cut at"* ]]; check "inject: claims re-checked, small handoff not cut"
 [[ $out == *"Old transcript: $proj/b.jsonl"* && $out != *"late user note"* ]]; check "no transcript copy, old transcript path given"
 [ -e "$hdir/b.used.md" ] && [ ! -e "$hdir/b.md" ] && [ ! -e "$state/pid-$$" ]; check "used: renamed, binding consumed"
+[[ $out == *"User messages only: jq -r"* && $out == *"If ## Last reply to the user asks"* ]]; check "inject: user-message command and last-reply rule"
+[ "$(cat "$state/new.chain")" = "$proj/b.jsonl" ]; check "inject: chain starts with the old transcript"
+
+printf '%s\n' /t/z1 /t/z2 /t/z3 /t/z4 /t/z5 > "$state/d.chain"
+echo "## Goal D" > "$hdir/d.md" && bind d
+inject > /dev/null
+[ "$(cat "$state/new.chain")" = "$proj/d.jsonl
+/t/z1
+/t/z2
+/t/z3
+/t/z4" ] && [ ! -e "$state/d.chain" ]; check "inject: chain keeps 5 transcripts, old chain removed"
+rm -f "$state/new.chain"
 [ -z "$(inject)" ]; check "used: next /clear loads nothing"
 
 touch -d '-3 hours' "$hdir/a.md" && bind a
@@ -156,7 +168,10 @@ printf '#!/bin/sh\nif [ "$1" = list-clients ]; then echo >> "%s/polls"; cat "%s/
   "$tmp" "$tmp" "$tmp" "$state" "$$" > "$fake/tmux"
 printf '#!/bin/sh\nexit 0\n' > "$fake/sleep"
 chmod +x "$fake/tmux" "$fake/sleep"
-stop() { jq -nc --arg s "$1" --argjson a "${2:-false}" '{session_id: $s, stop_hook_active: $a}' | PATH=$fake:$PATH "$here/handoff-stop.sh"; }
+stop() {   # sid [stop_hook_active] [last reply]
+  jq -nc --arg s "$1" --argjson a "${2:-false}" --arg r "${3:-}" '{session_id: $s, stop_hook_active: $a} + (if $r == "" then {} else {last_assistant_message: $r} end)' |
+    PATH=$fake:$PATH "$here/handoff-stop.sh"
+}
 in_tmux() { TMUX=/tmp/x,1,0 TMUX_PANE=%9 "$@"; }
 # handoff <sid> <status> [model]: this window's handoff for session sid
 handoff() {
@@ -180,7 +195,11 @@ reset; handoff t1 "done"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
 for _ in $(seq 50); do [ -e "$state/pid-$$" ] || break; command sleep 0.1; done
 command sleep 0.3
-[[ $out == *"the new session waits for you"* ]] && [ "$(cat "$tmp/keys")" = "send-keys -t %9 -l /clear
+[[ $out == *"the new session waits for you"* ]] && [ "$(cat "$tmp/keys")" = "send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l /clear
 send-keys -t %9 Enter" ]; check "stop, status done: clears, types no prompt"
 
 reset; handoff t1 continue
@@ -188,10 +207,18 @@ reset; handoff t1 continue
 
 reset; handoff t1 continue
 out=$(in_tmux stop t1 | jq -r .systemMessage)
-[ "$(keys)" = "send-keys -t %9 -l /clear
+[ "$(keys)" = "send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l /clear
 send-keys -t %9 Enter
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
 send-keys -t %9 -l Continue from the handoff.
-send-keys -t %9 Enter" ]; check "stop, continue: types /clear, then the prompt"
+send-keys -t %9 Enter" ]; check "stop, continue: clears the input, types /clear, then the prompt"
 [[ $out == *"cycle 1"* ]] && [ "$(cat "$state/pid-$$.cycles")" = "$(start_of $$) 1" ]; check "stop, continue: cycle counted"
 
 reset; handoff t1 continue
@@ -221,11 +248,46 @@ out=$(in_tmux stop t1 | jq -r .systemMessage)
 [[ $out == *"7 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, opus limit 7: user types /clear"
 
 reset; handoff t1 continue claude-haiku-5-5
-cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 40"
-in_tmux stop t1 > /dev/null
-[[ $(keys) == *"/clear"* ]]; check "stop, haiku: no limit"
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 7"
+out=$(in_tmux stop t1 | jq -r .systemMessage)
+[[ $out == *"7 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, haiku limit 7: user types /clear"
+
+reset; handoff t1 continue
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 6"
+out=$(in_tmux stop t1 | jq -r .systemMessage)
+[[ $out == *"cycle 7"* && $(keys) == *"/clear"* ]]; check "stop, cycle 7 of 7: still clears"
+
+# --- record: last reply and earlier transcripts ---
+reset; handoff t1 "done"
+printf '%s\n' /t/a.jsonl /t/b.jsonl > "$state/t1.chain"
+stop t1 false "Decide: A or B?" > /dev/null
+rec=$(sed -n '/^<!-- handoff-stop.sh/,$p' "$hdir/t1.md")
+[[ $rec == *"## Last reply to the user"*"Decide: A or B?"*"## Earlier transcripts"*"- /t/a.jsonl"*"- /t/b.jsonl"* ]]; check "record: last reply and earlier transcripts appended"
+stop t1 false "Second reply" > /dev/null
+[ "$(rg -c 'handoff-stop.sh: record' "$hdir/t1.md")" = 1 ] && rg -q 'Second reply' "$hdir/t1.md" && ! rg -q 'Decide' "$hdir/t1.md" && rg -q '^## Owed to the user' "$hdir/t1.md"; check "record: replaced on the next Stop, handoff kept"
+head -c 7000 /dev/zero | tr '\0' y > "$tmp/long"
+stop t1 false "$(cat "$tmp/long")" > /dev/null
+rg -q 'Cut at 6000 characters' "$hdir/t1.md" && [ "$(rg -o 'y{100,}' "$hdir/t1.md" | awk '{ print length }')" = 6000 ]; check "record: long reply cut with a notice"
+rm -f "$state/t1.chain"
 
 reset; handoff t1 continue
 [ -z "$(CLAUDE_CODE_SESSION_ATTENDED=0 in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop headless: nothing"
+
+# --- manual (/handoff) ---
+manual() { "$here/handoff-nudge.sh" --manual; }
+reset; rm -rf "$hdir"; mkdir -p "$tmp/.claude/projects/-work"
+transcript "$tmp/.claude/projects/-work/m1.jsonl" 20000 claude-haiku-5-5
+out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 manual)
+[[ $out == *"(/handoff)"*"Write the handoff to $HOME/.claude/handoffs/-tmp/m1.md"*"Outside tmux"*"## Next step"* ]]; check "manual: low context, outside tmux: instructions with template"
+[ "$(cat "$state/pid-$$")" = "$(start_of $$) $HOME/.claude/handoffs/-tmp/m1.md claude-haiku-5-5" ]; check "manual: handoff bound to this window"
+out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 TMUX=/tmp/x,1,0 TMUX_PANE=%9 manual)
+[[ $out == *"A hook then clears the session"* && $out != *"Outside tmux"* ]]; check "manual: in tmux, hook clears"
+mkdir -p "$HOME/.claude/handoffs/-tmp" && echo x > "$HOME/.claude/handoffs/-tmp/m1.md"
+out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 manual)
+[[ $out == *"exists"* && $out != *"## Next step"* ]]; check "manual: handoff exists: no second template"
+out=$(CLAUDE_CODE_SESSION_ID=nope manual)
+[[ $out == "[handoff] No session ID or transcript found"* ]]; check "manual: unknown session: error"
+out=$(CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_CODE_SESSION_ID=m1 manual)
+[[ $out == "[handoff] Not an interactive session"* ]]; check "manual: headless: error"
 
 exit $fail

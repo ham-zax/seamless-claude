@@ -27,18 +27,31 @@ fallback. There is no background model call.
    `## Owed to the user` section. Then it clears after every handoff, so no turn runs after it. With
    `status: continue` it also types a continue prompt. With `status: done` the new session waits for
    you:
-   - in tmux, a detached helper types `/clear` into this pane, waits until the handoff is loaded,
-     then types `Continue from the handoff.` (only for `continue`). It types only after 2 s without your input
+   - first it appends a record to the handoff: `## Last reply to the user` (the final visible reply
+     from the Stop input `last_assistant_message`, cut at 6000 characters) and `## Earlier
+     transcripts` (up to 4 sessions before this one). It replaces the record on every Stop until the
+     `/clear`;
+   - in tmux, a detached helper clears the input box, types `/clear` into this pane, waits until the
+     handoff is loaded, then clears the box again and types `Continue from the handoff.` (only for
+     `continue`). To clear the box it sends `x`, `Escape Escape` twice: `C-l` does not clear it, and
+     `Escape Escape` on an empty box opens Rewind. Unsent text in the box is lost. It types only after 2 s without your input
      in this pane (tmux `client_activity` of clients that show this pane), and gives up after 30 s
      of typing. Input in other panes does not count. Each give-up appends a line to
      `~/.claude/handoffs/.state/clear.log`;
-   - outside tmux, or after the automatic clear limit, it tells you to type `/clear`.
+   - outside tmux, or after 7 automatic clears in the window (every model), it tells you to type
+     `/clear`. Your `/clear` resets the count, and the next 7 clears run automatically.
 6. `handoff-inject.sh` (SessionStart, matcher `clear`) loads the handoff bound to this window, if the
    file exists and is less than 2 h old, and renames it to `<session-id>.used.md`. The header gives
-   the old transcript path, so the new session can read a detail that the handoff left out. The new
-   session gives the owed items before the Next step and re-checks a cheap claim before it builds on
+   the old transcript path and a `jq` command that prints only the user's messages, so the new
+   session can read a detail that the handoff left out. It saves the transcript chain for the next
+   handoff (`<session-id>.chain`). The new session gives the owed items and repeats any question in
+   the last reply before the Next step and re-checks a cheap claim before it builds on
    it. A handoff over 40,000 characters is cut with a notice that names the full file. The first
    `/clear` in the window removes the binding, with or without a handoff.
+
+`/handoff` starts a handoff at once, at any context size, in tmux or not: it runs
+`handoff-nudge.sh --manual`, which binds the handoff and prints the instructions and the template.
+Install it with `ln -s ~/repo/seamless-claude/handoff/handoff.md ~/.claude/commands/handoff.md`.
 
 `/clear` keeps the Claude process, so the PID stays the same and only the session ID changes. A
 `/clear` in another window, in the same folder or not, loads nothing and behaves natively. The start
@@ -54,7 +67,7 @@ outside tmux no handoff starts and native auto-compaction runs.
 
 | Model | Warn (checkpoint) | Stop now | Automatic clears per window | Native compaction starts |
 |---|---|---|---|---|
-| model id contains `haiku` | 90k | 100k | no limit | about 115k (`autoCompactWindow` 148000) |
+| model id contains `haiku` | 90k | 100k | 7 | about 115k (`autoCompactWindow` 148000) |
 | all other models | 140k | 150k | 7 | about 165k (`autoCompactWindow` 198000) |
 
 Native compaction starts at `autoCompactWindow` − 33k (the autocompact buffer that `/context`
@@ -89,6 +102,8 @@ inside tmux (for example `tmux new -A -s main`, then `claude`).
 - `~/.claude/handoffs/.state/pid-<pid>.auto`: an automatic `/clear` is in progress. One trigger per
   handoff.
 - `~/.claude/handoffs/.state/pid-<pid>.cycles`: `<start time> <count>`, automatic clears in a window.
+- `~/.claude/handoffs/.state/<session-id>.chain`: transcripts of the sessions before this one, newest
+  first. `handoff-inject.sh` writes it and removes the old session's chain.
 
 ## Test
 

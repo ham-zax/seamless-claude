@@ -10,7 +10,7 @@
 set -u
 
 input=$(cat)
-tp=$(jq -r '.transcript_path' <<<"$input")
+IFS=$'\t' read -r tp sid < <(jq -r '[.transcript_path, .session_id] | @tsv' <<<"$input")
 state=$HOME/.claude/handoffs/.state
 # handoff-stop.sh marks the /clear it types. A /clear that the user types resets its count.
 if [ -e "$state/pid-${CLAUDE_PID:-x}.auto" ]; then
@@ -29,13 +29,15 @@ dir=${file%/*}
 old=$(basename "$file" .md)
 mtime=$(stat -c %Y "$file")
 used=$dir/$old.used.md
+otp=${tp%/*}/$old.jsonl
 
 ctx="# Handoff restored after /clear
 Source session: $old (full history: claude --resume $old)
-Old transcript: ${tp%/*}/$old.jsonl (read only the part you need, for a detail the handoff left out)
+Old transcript: $otp (read only the part you need, for a detail the handoff left out)
+User messages only: jq -r 'select(.type == \"user\" and (.message.content | type) == \"string\") | .message.content' <transcript>
 Written $(( ($(date +%s) - mtime) / 60 )) min ago. File: $used
 Other handoffs for this folder: $dir
-Before the Next step, give the user every item under ## Owed to the user in visible text.
+Before the Next step, give the user every item under ## Owed to the user in visible text. If ## Last reply to the user asks the user a question or for a decision, ask it again.
 The handoff holds the old session's claims. Re-check a claim before you build on it when the check is cheap.
 
 $(cat "$file")"
@@ -45,4 +47,10 @@ max=40000
 [handoff] Cut at $max characters. Read the rest of $used before you continue."
 
 jq -n --arg c "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}' \
-  && mv "$file" "$used"
+  && mv "$file" "$used" || exit 0
+# Transcript chain for the new session's handoff (handoff-stop.sh lists it): the old session, then
+# the 4 newest sessions before it.
+if [[ $sid =~ ^[A-Za-z0-9-]+$ ]]; then
+  { echo "$otp"; head -n 4 "$state/$old.chain" 2>/dev/null; } > "$state/$sid.chain"
+fi
+rm -f "$state/$old.chain"

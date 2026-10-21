@@ -5,15 +5,26 @@
 # loads the file into the new session. Native auto-compaction stays the fallback: autoCompactWindow
 # in settings.json must put it above the stop limit (window - 33k buffer).
 #
+#
+# With --manual (the /handoff command runs it in the Bash environment of the session) it skips the
+# limits and prints the handoff instructions as plain text. It works outside tmux too: the user then
+# types /clear.
+manual=; [ "${1:-}" = --manual ] && manual=1
+fail() { [ -z "$manual" ] || echo "[handoff] $1"; exit 0; }
 # Headless runs (claude -p, SDK, workers) have nobody to type /clear: skip them.
-[ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ] || exit 0
+[ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ] || fail "Not an interactive session: no handoff."
 # Outside tmux nothing can clear the session automatically: native auto-compaction handles it.
-[ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || exit 0
+[ -n "$manual" ] || { [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; } || exit 0
 set -u
 
-input=$(cat)
-IFS=$'\t' read -r event sid tp cwd < <(jq -r '[.hook_event_name, .session_id, .transcript_path, .cwd] | @tsv' <<<"$input")
-[[ $sid =~ ^[A-Za-z0-9-]+$ ]] && [ -r "$tp" ] || exit 0
+if [ -n "$manual" ]; then
+  event='' sid=${CLAUDE_CODE_SESSION_ID:-} cwd=$PWD
+  tp=$(find "$HOME/.claude/projects" -mindepth 2 -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null)
+else
+  input=$(cat)
+  IFS=$'\t' read -r event sid tp cwd < <(jq -r '[.hook_event_name, .session_id, .transcript_path, .cwd] | @tsv' <<<"$input")
+fi
+[[ $sid =~ ^[A-Za-z0-9-]+$ ]] && [ -r "${tp:-}" ] || fail "No session ID or transcript found: no handoff."
 
 # Context size = input + cache tokens of the last main-chain assistant entry. A compact_boundary after
 # it makes that number stale, so it reads as 0 until the next reply.
@@ -23,16 +34,16 @@ read -r tokens model < <(tail -c 4000000 "$tp" | jq -Rr '
       "\(.message.usage | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)) \(.message.model)"
     elif .subtype == "compact_boundary" then "0 compact"
     else empty end' | tail -n 1)
-[[ ${tokens:-} =~ ^[0-9]+$ ]] || exit 0
+[[ ${tokens:-} =~ ^[0-9]+$ ]] || { [ -n "$manual" ] && tokens=0 model=unknown; } || exit 0
 
 case $model in
   *haiku*) warn=90000 hard=100000 ;;   # native compaction (autoCompactWindow 148000) starts near 115k
   *)       warn=140000 hard=150000 ;;   # native compaction (autoCompactWindow 198000) starts near 165k
 esac
-(( tokens >= warn )) || exit 0
+[ -n "$manual" ] || (( tokens >= warn )) || exit 0
 
 file=$HOME/.claude/handoffs/${cwd//[^A-Za-z0-9]/-}/$sid.md
-[ -e "$file" ] && exit 0   # handoff written: no more messages
+[ -e "$file" ] && fail "The handoff $file exists. End your turn: the Stop hook continues from it."   # handoff written: no more messages
 state=$HOME/.claude/handoffs/.state
 mkdir -p "$state"
 k=$((tokens / 1000)) h=$((hard / 1000))
@@ -77,7 +88,16 @@ Running processes, background jobs, workers and their IDs, temp files, pending a
 ## Next step
 The exact next action and its stop condition. Open questions for the user."
 
-if (( tokens < hard )); then
+if [ -n "$manual" ]; then
+  bind || fail "Cannot bind the handoff to this window (CLAUDE_PID unset): no handoff."
+  [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || after="Outside tmux: after your turn, the user types /clear and the new session loads the handoff."
+  printf '%s\n' "[handoff] The user asked for a handoff now (/handoff). Do not start a new step. Let background jobs run.
+$owed
+Write the handoff to $file as your last action, then end your turn. $after
+
+$template"
+  exit 0
+elif (( tokens < hard )); then
   mark warn || exit 0
   bind
   msg="[handoff] Context is at ${k}k tokens. We start a new session soon. At ${h}k a [handoff] message tells you to stop at once.
