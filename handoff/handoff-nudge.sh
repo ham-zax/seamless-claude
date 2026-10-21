@@ -36,10 +36,9 @@ read -r tokens model < <(tail -c 4000000 "$tp" | jq -Rr '
     else empty end' | tail -n 1)
 [[ ${tokens:-} =~ ^[0-9]+$ ]] || { [ -n "$manual" ] && tokens=0 model=unknown; } || exit 0
 
-case $model in
-  *haiku*) warn=90000 hard=100000 ;;   # native compaction (autoCompactWindow 148000) starts near 115k
-  *)       warn=140000 hard=150000 ;;   # native compaction (autoCompactWindow 198000) starts near 165k
-esac
+# shellcheck source=limits.sh
+. "${BASH_SOURCE[0]%/*}/limits.sh"
+read -r warn hard < <(handoff_limits "$model")
 [ -n "$manual" ] || (( tokens >= warn )) || exit 0
 
 file=$HOME/.claude/handoffs/${cwd//[^A-Za-z0-9]/-}/$sid.md
@@ -62,8 +61,15 @@ after="A hook then clears the session and continues from the handoff in a new se
 # answer that only exists in reasoning or in the handoff file is lost at /clear.
 owed="A handoff never replaces a reply. If the user asked something, answer it in visible text first when the answer is short. Otherwise list it under ## Owed to the user."
 
-template="The handoff replaces this whole conversation for the next session. Keep only what is expensive or impossible to rebuild from git and the repository. Rules: about 2000 words at most. Omit empty sections. Keep paths, commands, IDs and error messages verbatim. Give pointers (file:line, command) instead of file contents. Do not list modified files: git shows them.
-status: write continue if work remains that you can do without the user. Write done if the request is complete and verified, or the next step needs the user.
+template="The handoff replaces this whole conversation for the next session. Keep what governs the next actions: intent, constraints, promises, decisions, uncertainty, and pointers to evidence. Leave out what git and the repository show. Target 1000-1500 words, 2000 at most, one line per bullet. Cut history and repeats first, never a constraint or an open promise.
+Rules:
+- Carry forward: if this session started from a handoff, copy its still-valid Constraints, Decisions and Next step items. Drop only items that are done or that the user replaced. Mark a replaced decision as REPLACED.
+- Quote only short binding user clauses. Use quotes only for exact words, and mark a paraphrase with ~. The user dictates by voice: after a likely misheard word, add [= meaning, confirmed | assumed].
+- Never invent a quote, path, result or locator. If a detail is lost, write UNKNOWN and a phrase to search for in the old transcript.
+- Do not list finished, intended edits: git shows them. List uncommitted edits that are partial, broken, temporary (debug code to revert), or the user's work to keep.
+- Write every section. Write none for an empty section, so the next session knows you checked it.
+- status: continue only if approved work remains that needs no user input. Write done if the request is complete and verified, or if a question under ## Next step blocks progress. The hook clears the screen right after your turn, so the user may not read your last reply: put every open answer and question from it under ## Owed to the user.
+- Before you write the file, recall from the whole conversation: binding constraints, open questions and promises, partial edits, unverified claims, failed approaches and blockers. The file must hold each one. Do not add a summary.
 
 ---
 session: $sid
@@ -72,21 +78,23 @@ created: <ISO time>
 status: continue | done
 ---
 ## Goal
-The request and its done condition. Quote the user's direction-setting messages verbatim: requests, corrections, constraints, approvals.
+The current request and its observable done condition. If there are several tasks, name the active one.
+## Constraints
+Standing user rules: scope limits and non-goals, forbidden actions, workflow and test rules, answer format. Approvals with their limits (approval to investigate is not approval to edit). Mark each as user-stated or inferred.
 ## Owed to the user
-Always include this section. List every user question or request that the user has not yet seen answered in a visible reply, quoted verbatim, with any partial findings. An answer that exists only in your reasoning or in this file is owed. Write \"none\" only if the user saw every answer.
+Always include this section. Every user question or request without a visible answer, and every promise you made (\"I will check X later\"), with partial findings and what remains. An answer that exists only in your reasoning or in this file is owed. Write \"none\" only if nothing remains.
 ## State
-What is done and how it was verified (command and result). What is in progress.
+Done, in progress, blocked. For each check: command, result, and the state it covered. A check from before a later edit does not prove that edit. Partial and temporary edits (see Rules). If status is done: complete, or waiting for the user and on what.
 ## Decisions
-DECISION: choice, reason. Include what the user approved or rejected.
-## Dead ends
-FAILED: what was tried, why it failed.
+DECISION: choice, reason, source (user or agent). FAILED: approach, exact reason, the condition for a retry. Mark replaced decisions.
+## Uncertainty
+Assumptions you built on but did not verify, open hypotheses, known risks. For each, the check that decides it.
 ## Facts to keep
-Facts that cost tokens to find again: file:line locations, commands, measured numbers, environment quirks.
+Facts that cost tokens to find again: file:line locations, commands, measured numbers, environment quirks. In 1-4 lines, how the relevant code path works or the current root-cause hypothesis.
 ## Live state
-Running processes, background jobs, workers and their IDs, temp files, pending approvals.
+Running processes, background jobs, workers and their IDs, worktrees, temp files, pending approvals, and how to check that each still exists.
 ## Next step
-The exact next action and its stop condition. Open questions for the user."
+A prerequisite check, then the exact next action and its stop condition. Then the remaining plan in order, including cleanup of temporary edits. Then any question that blocks progress."
 
 if [ -n "$manual" ]; then
   bind || fail "Cannot bind the handoff to this window (CLAUDE_PID unset): no handoff."

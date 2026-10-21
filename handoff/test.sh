@@ -44,6 +44,7 @@ transcript "$proj/s1.jsonl" 141000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *141k*"We start a new session soon"*"Plan a checkpoint within about 10k tokens"*"At the checkpoint, write the handoff to: $hdir/s1.md"*"status: continue | done"*"## Next step"* ]]; check "warn: checkpoint message with template"
 [[ $out == *"never replaces a reply"*"## Owed to the user"*"Always include this section"* ]]; check "warn: reply owed before handoff"
+[[ $out == *"Carry forward"*"UNKNOWN"*"Write every section"*"## Constraints"*"## Uncertainty"*"## Live state"* ]]; check "warn: template has carry-forward, UNKNOWN, constraints and uncertainty"
 [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: handoff bound to this window"
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "warn: not repeated"
 
@@ -117,11 +118,11 @@ later=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%S.000Z)
 } > "$proj/b.jsonl"
 out=$(inject | ctx)
 [[ $out == *"Source session: b"*"## Goal B"* && $out != *"Goal A"* ]]; check "this window: its own handoff injected"
-[[ $out == *"Before the Next step, give the user every item under ## Owed to the user"* ]]; check "inject: owed items first"
-[[ $out == *"Re-check a claim before you build on it"* && $out != *"Cut at"* ]]; check "inject: claims re-checked, small handoff not cut"
+[[ $out == *"Before the Next step:"*"1. Give the user every item under ## Owed to the user"*"2. Run git status"* ]]; check "inject: owed items first, then git status"
+[[ $out == *"not a new approval"*"Search the old transcript before you act if:"*"Re-check a claim before an action that depends on it"* && $out != *"Cut at"* ]]; check "inject: no new approval, transcript triggers, claims re-checked, small handoff not cut"
 [[ $out == *"Old transcript: $proj/b.jsonl"* && $out != *"late user note"* ]]; check "no transcript copy, old transcript path given"
 [ -e "$hdir/b.used.md" ] && [ ! -e "$hdir/b.md" ] && [ ! -e "$state/pid-$$" ]; check "used: renamed, binding consumed"
-[[ $out == *"User messages only: jq -r"* && $out == *"If ## Last reply to the user asks"* ]]; check "inject: user-message command and last-reply rule"
+[[ $out == *"without tool output"*"jq -r 'select(.type == \"user\" or .type == \"assistant\")"*"map(select(.type == \"text\")"* && $out == *"repeat any answer or question in it that is still open"* ]]; check "inject: array-safe user-message command and last-reply rule"
 [ "$(cat "$state/new.chain")" = "$proj/b.jsonl" ]; check "inject: chain starts with the old transcript"
 
 printf '%s\n' /t/z1 /t/z2 /t/z3 /t/z4 /t/z5 > "$state/d.chain"

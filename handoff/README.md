@@ -20,8 +20,11 @@ fallback. There is no background model call.
 3. At the stop limit it injects one message: stop now, let background jobs run, write the handoff at
    once. Each later prompt and tool result gets a one-line reminder until the file exists. Native
    auto-compaction is the last fallback.
-4. Every handoff has a `## Owed to the user` section: each question the user has not seen answered,
-   or `none`. The front matter has `status: continue` (work remains that needs no user decision) or
+4. The template (`handoff-nudge.sh`, `template=`) has these sections: Goal, Constraints, Owed to the
+   user, State, Decisions, Uncertainty, Facts to keep, Live state, Next step. Every section is written,
+   with `none` when empty. Items from an earlier handoff carry forward, and a lost detail is marked
+   `UNKNOWN`. Every handoff has a `## Owed to the user` section: each question the user has not seen
+   answered, and each promise, or `none`. The front matter has `status: continue` (work remains that needs no user decision) or
    `status: done`.
 5. `handoff-stop.sh` (Stop) blocks the stop once if this session's handoff has no
    `## Owed to the user` section. Then it clears after every handoff, so no turn runs after it. With
@@ -64,6 +67,9 @@ are not affected. `handoff-nudge.sh` also does nothing unless `$TMUX` and `$TMUX
 outside tmux no handoff starts and native auto-compaction runs.
 
 ## Limits
+
+The limits live in `handoff/limits.sh`. `~/.claude/statusline.sh` sources the same file and shows
+`hoff <percent of the stop limit>`.
 
 | Model | Warn (checkpoint) | Stop now | Automatic clears per window | Native compaction starts |
 |---|---|---|---|---|

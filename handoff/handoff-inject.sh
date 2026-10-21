@@ -33,12 +33,17 @@ otp=${tp%/*}/$old.jsonl
 
 ctx="# Handoff restored after /clear
 Source session: $old (full history: claude --resume $old)
-Old transcript: $otp (read only the part you need, for a detail the handoff left out)
-User messages only: jq -r 'select(.type == \"user\" and (.message.content | type) == \"string\") | .message.content' <transcript>
+Old transcript: $otp
 Written $(( ($(date +%s) - mtime) / 60 )) min ago. File: $used
 Other handoffs for this folder: $dir
-Before the Next step, give the user every item under ## Owed to the user in visible text. If ## Last reply to the user asks the user a question or for a decision, ask it again.
-The handoff holds the old session's claims. Re-check a claim before you build on it when the check is cheap.
+The handoff is a record of the old session, not a new approval. Current user and project instructions win over it.
+Before the Next step:
+1. Give the user every item under ## Owed to the user in visible text. Investigate an open item before you call it answered. The user may not have read ## Last reply to the user: repeat any answer or question in it that is still open.
+2. Run git status and compare the changes with ## State.
+Search the old transcript before you act if: scope, an approval, a user preference or a dictated word is unclear; the handoff conflicts with the repository or current instructions; you would reverse a decision, retry a FAILED approach, or change an edit whose owner or intent is unclear; an action depends on a claim with no evidence; the handoff says UNKNOWN.
+Never read the whole transcript. Print its text without tool output, one message per line with line number and role, and filter it (user messages only: rg '^[0-9]+ \\[user\\]'):
+jq -r 'select(.type == \"user\" or .type == \"assistant\") | (.message.content | if type == \"string\" then . else (map(select(.type == \"text\") | .text) | join(\" \")) end | gsub(\"\\n\"; \" \")) as \$t | select(\$t != \"\") | \"\\(input_line_number) [\\(.type)] \\(\$t)\"' <transcript> | rg -i '<phrase>'
+An empty search does not prove absence. If a doubt that matters remains, ask the user. Re-check a claim before an action that depends on it.
 
 $(cat "$file")"
 # Cut at the limit, but say so: the last sections (Next step) go first, and the full file stays on disk.
