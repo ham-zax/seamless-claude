@@ -66,6 +66,30 @@ All hooks do nothing unless `CLAUDE_CODE_SESSION_ATTENDED=1`, so `claude -p`, SD
 are not affected. `handoff-nudge.sh` also does nothing unless `$TMUX` and `$TMUX_PANE` are set, so
 outside tmux no handoff starts and native auto-compaction runs.
 
+## Side note (optional, off)
+
+`handoff/sidenote.sh` lets a side model keep a note of your rules, approvals, open promises and
+decisions while the main model works. The side note is off by default. To turn it on, set
+`"env": { "HANDOFF_NOTE": "haiku" }` or `"pi"` in `~/.claude/settings.json`:
+
+- `haiku`: `claude -p --model claude-haiku-5-5 --effort xhigh` on your Claude account. `--bare` is
+  not used, because it needs an API key.
+- `pi`: `pi -p --model opencode2api/minimax-m3.1-flash-free` (free OpenAI-compatible endpoint).
+
+`handoff-nudge.sh` starts the runs: the first at 70k tokens, then after each 20k new tokens, and one
+last run when the warn message arrives. Below the warn limit Claude gets no message. Each run is a new
+detached process with the handoff hooks off. It reads the note and the user and assistant text since
+the last good run (no tool output, the newest 400,000 characters at most), writes the updated note
+through a temp file and a rename, and stops within 300 s.
+
+- One run at a time: a lock file blocks a second run. The hook tries again on the next tool call.
+  A lock older than 6 min belongs to a dead run and is removed.
+- A run saves the read position only after it succeeds, so a blocked or failed run loses no text.
+- The note belongs to the window (PID and start time), not to the session. After `/clear` the new
+  session keeps the note, and a last run that ends after the `/clear` still updates it.
+- The warn, stop and `/handoff` messages tell Claude to read the note, check it, and copy each
+  still-valid item into the handoff. The restore header names the note.
+
 ## Limits
 
 The limits live in `handoff/limits.sh`. `~/.claude/statusline.sh` sources the same file and shows
@@ -102,6 +126,11 @@ inside tmux (for example `tmux new -A -s main`, then `claude`).
 
 - `~/.claude/handoffs/<cwd-slug>/<session-id>.md`: handoff, written by Claude.
 - `~/.claude/handoffs/<cwd-slug>/<session-id>.used.md`: handoff after injection. Kept for review.
+- `~/.claude/handoffs/<cwd-slug>/window-<pid>-<start time>.note.md`: side note of a window, only
+  when the side note is on. Kept for review.
+- `~/.claude/handoffs/.state/pid-<pid>.note` (`<start time> <transcript> <read position>`),
+  `.note.at` (`<start time> <transcript> <tokens at the last start> <last run started 0|1>`) and
+  `.note.lock` (a run works): side note state.
 - `~/.claude/handoffs/.state/<session-id>.warn` and `.hard`: tiers already injected for a session.
   The hook creates them atomically, so parallel tool calls inject each message once.
 - `~/.claude/handoffs/.state/pid-<pid>`: `<start time> <handoff path> <model>`, the binding to a window.

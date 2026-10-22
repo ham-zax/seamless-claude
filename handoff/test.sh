@@ -95,6 +95,65 @@ out=$(TMUX='' nudge UserPromptSubmit s8 "$proj/s8.jsonl")
 transcript "$proj/s9.jsonl" 141000
 out=$(nudge UserPromptSubmit s9 "$proj/s9.jsonl" | ctx)
 [[ $out == *"A hook then clears the session"* ]]; check "warn: in tmux, hook clears"
+[[ $out != *"side model"* ]]; check "side note off by default: warn message names no note"
+
+# --- side note (sidenote.sh), on only with HANDOFF_NOTE ---
+# Stub engines: log each run, print the arguments, the hook environment and stdin (the note grows).
+bin=$tmp/bin; mkdir -p "$bin"
+for e in claude pi; do
+  # shellcheck disable=SC2016  # the stub expands its own variables
+  printf '#!/usr/bin/env bash\necho run >> "%s"\necho "%s args: $*"; echo "attended=${CLAUDE_CODE_SESSION_ATTENDED:-} tmux=${TMUX:-}"; cat\n' "$tmp/runs" "$e" > "$bin/$e"
+  chmod +x "$bin/$e"
+done
+note=$hdir/window-$$-$(start_of $$).note.md lock=$state/pid-$$.note.lock
+runs() { cat "$tmp/runs" 2>/dev/null | wc -l; }
+idle() { for _ in $(seq 50); do [ ! -e "$lock" ] && return 0; sleep 0.1; done; return 1; }   # run ended
+sn() { PATH=$bin:$PATH HANDOFF_NOTE=${E:-haiku} nudge PostToolUse "$1" "$proj/$1.jsonl"; }
+# A real transcript only grows: append a usage line instead of rewriting the file.
+grow() { transcript "$tmp/line" "$2"; cat "$tmp/line" >> "$proj/$1.jsonl"; }   # sid tokens
+say() { jq -nc --arg r "$1" --arg c "$2" '{type: $r, message: {content: $c}}' >> "$proj/$3.jsonl"; }   # role text sid
+
+transcript "$proj/w1.jsonl" 69000; say user "never push to main" w1
+[ -z "$(sn w1)" ] && [ "$(runs)" = 0 ]; check "side note: no run below 70k"
+transcript "$proj/w1.jsonl" 71000; say user "never push to main" w1
+say user "<system-reminder>a CLAUDE.md rule</system-reminder>" w1
+out=$(sn w1); idle
+[ -z "$out" ] && [ "$(runs)" = 1 ]; check "side note: first run at 71k, no message to Claude"
+n=$(cat "$note")
+[[ $n == *"claude args: -p --model claude-haiku-5-5 --effort xhigh --no-session-persistence --settings {\"disableAllHooks\": true} You keep a note"* ]]; check "side note haiku: xhigh effort, hooks off, no session"
+[[ $n == *"attended=0 tmux="*"=== Current note"*none*"=== Newest session text"*"[user] never push to main"* && $n != *usage* && $n != *"CLAUDE.md rule"* ]]; check "side note: hooks see no session, input is note plus text only, no system reminders"
+[ "$(cut -d' ' -f3 "$state/pid-$$.note")" = "$(stat -c %s "$proj/w1.jsonl")" ] && [ -z "$(find "$hdir" -name '*.note.md.*')" ]; check "side note: read position saved, no temp files left"
+grow w1 85000; say user "never push to main" w1
+sn w1 > /dev/null; idle
+[ "$(runs)" = 1 ]; check "side note: no run before 20k more tokens"
+grow w1 92000; say assistant "I will check the lock later" w1
+: > "$lock"
+sn w1 > /dev/null; sleep 0.3
+[ "$(runs)" = 1 ]; check "side note: a working run blocks a new run"
+touch -d '-7 minutes' "$lock"
+sn w1 > /dev/null; idle
+n=$(cat "$note")
+[ "$(runs)" = 2 ] && [[ $n == *"=== Current note"*"[user] never push to main"*"=== Newest session text"*"[assistant] I will check the lock later" ]]; check "side note: stale lock removed, next run gets the old note and only the new text"
+grow w1 141000; say user "use pnpm" w1
+out=$(sn w1 | ctx); idle
+[ "$(runs)" = 3 ] && [[ $out == *"Plan a checkpoint"*"A side model keeps a note"*"at $note"*"## Next step"* ]]; check "side note: last run at warn, warn message names the note"
+grow w1 151000
+out=$(sn w1 | ctx); idle
+[ "$(runs)" = 3 ] && [[ $out == *"Stop now"*"at $note"* ]]; check "side note: no run at the stop limit after the last run, stop message names the note"
+transcript "$proj/w2.jsonl" 71000; say user "new session text" w2
+sn w2 > /dev/null; idle
+n=$(cat "$note")
+[ "$(runs)" = 4 ] && [[ $n == *"=== Current note"*"use pnpm"*"=== Newest session text"*"[user] new session text" && ${n##*=== Newest session text} != *"use pnpm"* ]]; check "side note: next session in the window keeps the note, reads its own transcript"
+transcript "$proj/w3.jsonl" 71000; say user "x" w3
+E=pi sn w3 > /dev/null; idle
+[[ $(cat "$note") == "pi args: -p --model opencode2api/minimax-m3.1-flash-free --no-session --no-context-files @$note.in You keep a note"* ]]; check "side note pi: MiniMax M3.1, text as a file"
+transcript "$proj/w4.jsonl" 141000
+out=$(E=sonnet sn w4 | ctx); sleep 0.3
+[[ $out != *"side model"* ]] && [ "$(runs)" = 5 ]; check "side note: unknown engine is off"
+echo "## Goal W" > "$hdir/w.md"; printf '%s %s\n' "$(start_of $$)" "$hdir/w.md" > "$state/pid-$$"
+out=$(jq -nc --arg t "$proj/new.jsonl" --arg c "$cwd" '{transcript_path: $t, session_id: "neww", source: "clear", cwd: $c}' | "$here/handoff-inject.sh" | ctx)
+[[ $out == *"Side note of this window"*"$note"*"## Goal W"* ]]; check "inject: header names the side note"
+rm -f "$tmp/runs" "$state"/pid-$$.note*
 
 # --- inject ---
 inject() { jq -nc --arg t "$proj/new.jsonl" '{transcript_path: $t, session_id: "new", source: "clear"}' | "$here/handoff-inject.sh"; }
@@ -117,7 +176,7 @@ later=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%S.000Z)
     {type: "text", text: "late answer"}, {type: "tool_use", name: "Bash", input: {command: "ls"}}]}}'
 } > "$proj/b.jsonl"
 out=$(inject | ctx)
-[[ $out == *"Source session: b"*"## Goal B"* && $out != *"Goal A"* ]]; check "this window: its own handoff injected"
+[[ $out == *"Source session: b"*"## Goal B"* && $out != *"Goal A"* && $out != *"Side note"* ]]; check "this window: its own handoff injected, no side note line"
 [[ $out == *"Before the Next step:"*"1. Give the user every item under ## Owed to the user"*"2. Run git status"* ]]; check "inject: owed items first, then git status"
 [[ $out == *"not a new approval"*"Search the old transcript before you act if:"*"Re-check a claim before an action that depends on it"* && $out != *"Cut at"* ]]; check "inject: no new approval, transcript triggers, claims re-checked, small handoff not cut"
 [[ $out == *"Old transcript: $proj/b.jsonl"* && $out != *"late user note"* ]]; check "no transcript copy, old transcript path given"

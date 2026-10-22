@@ -38,14 +38,25 @@ read -r tokens model < <(tail -c 4000000 "$tp" | jq -Rr '
 
 # shellcheck source=limits.sh
 . "${BASH_SOURCE[0]%/*}/limits.sh"
+# shellcheck source=sidenote.sh
+. "${BASH_SOURCE[0]%/*}/sidenote.sh"
 read -r warn hard < <(handoff_limits "$model")
-[ -n "$manual" ] || (( tokens >= warn )) || exit 0
+# Side note (sidenote.sh): it belongs to this window, so it needs the PID and the start time.
+pstart=$(sed 's/.*) //' "/proc/${CLAUDE_PID:-x}/stat" 2>/dev/null | cut -d' ' -f20)
+engine=; [ -z "$pstart" ] || engine=$(sidenote_engine)
+[ -n "$manual" ] || (( tokens >= warn )) || { [ -n "$engine" ] && (( tokens >= sidenote_start )); } || exit 0
 
 file=$HOME/.claude/handoffs/${cwd//[^A-Za-z0-9]/-}/$sid.md
 [ -e "$file" ] && fail "The handoff $file exists. End your turn: the Stop hook continues from it."   # handoff written: no more messages
 state=$HOME/.claude/handoffs/.state
 mkdir -p "$state"
 k=$((tokens / 1000)) h=$((hard / 1000))
+copy=
+if [ -n "$engine" ]; then
+  note=$(sidenote_file "$cwd" "$CLAUDE_PID" "$pstart")
+  copy=" $(sidenote_copy "$note")"
+  [ -n "$manual" ] || sidenote_tick "$engine" "$tp" "$tokens" "$warn" "$note" "$state" "$CLAUDE_PID" "$pstart"
+fi
 # One message per tier: parallel tool calls run this hook at the same time, and only the hook that
 # creates the marker file first injects.
 mark() { (set -o noclobber; : > "$state/$sid.$1") 2>/dev/null; }
@@ -61,7 +72,7 @@ after="A hook then clears the session and continues from the handoff in a new se
 # answer that only exists in reasoning or in the handoff file is lost at /clear.
 owed="A handoff never replaces a reply. If the user asked something, answer it in visible text first when the answer is short. Otherwise list it under ## Owed to the user."
 
-template="The handoff replaces this whole conversation for the next session. Keep what governs the next actions: intent, constraints, promises, decisions, uncertainty, and pointers to evidence. Leave out what git and the repository show. Target 1000-1500 words, 2000 at most, one line per bullet. Cut history and repeats first, never a constraint or an open promise.
+template="The handoff replaces this whole conversation for the next session. Keep what governs the next actions: intent, constraints, promises, decisions, uncertainty, and pointers to evidence. Leave out what git and the repository show. Size: as short as the session allows, usually 2500-5000 tokens, 6000 at most. A session with much data can use more of that space. Never pad. One line per bullet. If the handoff is too long, cut history and repeats first, never a constraint or an open promise.
 Rules:
 - Carry forward: if this session started from a handoff, copy its still-valid Constraints, Decisions and Next step items. Drop only items that are done or that the user replaced. Mark a replaced decision as REPLACED.
 - Quote only short binding user clauses. Use quotes only for exact words, and mark a paraphrase with ~. The user dictates by voice: after a likely misheard word, add [= meaning, confirmed | assumed].
@@ -101,10 +112,12 @@ if [ -n "$manual" ]; then
   [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || after="Outside tmux: after your turn, the user types /clear and the new session loads the handoff."
   printf '%s\n' "[handoff] The user asked for a handoff now (/handoff). Do not start a new step. Let background jobs run.
 $owed
-Write the handoff to $file as your last action, then end your turn. $after
+Write the handoff to $file as your last action, then end your turn. $after$copy
 
 $template"
   exit 0
+elif (( tokens < warn )); then
+  exit 0   # only the side note runs below the warn limit: no message to Claude
 elif (( tokens < hard )); then
   mark warn || exit 0
   bind
@@ -112,13 +125,13 @@ elif (( tokens < hard )); then
 Continue your work. Plan a checkpoint within about 10k tokens: a finished, verified step. Do not start a sub-task that you cannot finish before it.
 $owed
 At the checkpoint, write the handoff to: $file
-Make it your last action and end your turn. $after
+Make it your last action and end your turn. $after$copy
 
 $template"
 elif mark hard; then
   bind
   msg="[handoff] Context is at ${k}k tokens, at the ${h}k stop limit for this model. Stop now. Do not finish the current step.
-Let background jobs run. Move a long foreground command to the background. List every unanswered user question under ## Owed to the user. Write the handoff to $file now as your last action, then end your turn. $after"
+Let background jobs run. Move a long foreground command to the background. List every unanswered user question under ## Owed to the user. Write the handoff to $file now as your last action, then end your turn. $after$copy"
   # Context can jump past the warn limit in one tool result: then the template comes here.
   mark warn && msg+="
 

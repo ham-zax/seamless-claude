@@ -10,7 +10,7 @@
 set -u
 
 input=$(cat)
-IFS=$'\t' read -r tp sid < <(jq -r '[.transcript_path, .session_id] | @tsv' <<<"$input")
+IFS=$'\t' read -r tp sid cwd < <(jq -r '[.transcript_path, .session_id, .cwd] | @tsv' <<<"$input")
 state=$HOME/.claude/handoffs/.state
 # handoff-stop.sh marks the /clear it types. A /clear that the user types resets its count.
 if [ -e "$state/pid-${CLAUDE_PID:-x}.auto" ]; then
@@ -30,12 +30,17 @@ old=$(basename "$file" .md)
 mtime=$(stat -c %Y "$file")
 used=$dir/$old.used.md
 otp=${tp%/*}/$old.jsonl
+# shellcheck source=sidenote.sh
+. "${BASH_SOURCE[0]%/*}/sidenote.sh"
+note=$(sidenote_file "$cwd" "$CLAUDE_PID" "$start")
+noteline=; [ -f "$note" ] && noteline="
+Side note of this window (a side model keeps the user's rules, approvals, promises and decisions; it can be wrong): $note"
 
 ctx="# Handoff restored after /clear
 Source session: $old (full history: claude --resume $old)
 Old transcript: $otp
 Written $(( ($(date +%s) - mtime) / 60 )) min ago. File: $used
-Other handoffs for this folder: $dir
+Other handoffs for this folder: $dir$noteline
 The handoff is a record of the old session, not a new approval. Current user and project instructions win over it.
 Before the Next step:
 1. Give the user every item under ## Owed to the user in visible text. Investigate an open item before you call it answered. The user may not have read ## Last reply to the user: repeat any answer or question in it that is still open.
