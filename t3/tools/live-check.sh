@@ -49,7 +49,7 @@ texts() { jq -r --argjson f "$2" '.messages[$f:][] | "[\(.role)] \(.text // "" |
 start=$(cd "$t3dir/.." && timeout 300 "$T3" thread start . "t3 live-check. Remember the code word KIWI-42. \
 Say 1 with the code word. Then run $now in Bash, follow its instructions, write the handoff with \
 status: done, and end the turn." --provider claudeAgent --model "$model" --wait --json) ||
-  { echo "thread start failed" >&2; exit 2; }
+  { echo "thread start failed. If no T3 project contains $t3dir/.., run: \"$T3\" project add $(cd "$t3dir/.." && pwd)" >&2; exit 2; }
 id=$(jq -r .threadId <<<"$start")
 echo "thread $id"
 j=$(show_until 1)
