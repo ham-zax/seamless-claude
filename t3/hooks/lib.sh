@@ -5,18 +5,23 @@
 
 # shellcheck disable=SC2034  # used by the hooks that source this file
 t3_handoff_dir=$(cd "${BASH_SOURCE[0]%/*}/../../handoff" && pwd)
-t3_runtime=${T3_HANDOFF_RUNTIME:-$HOME/.t3/wsl-runtime}
+# Folders of the T3 server binaries: the desktop app in WSL (wsl-runtime/sha256-…/t3) and the Linux
+# service (runtime/versions/<version>/t3, `t3code.service`).
+t3_runtimes=${T3_HANDOFF_RUNTIME:-$HOME/.t3/wsl-runtime:$HOME/.t3/runtime}
 t3_userdata=${T3_HANDOFF_USERDATA:-$HOME/.t3/userdata}
 
 # t3_server_exe: prints the exe of the T3 server that runs this Claude process. The server is the
 # direct parent of $CLAUDE_PID (F1). Walks up a few levels in case a wrapper sits between them.
 t3_server_exe() {
-  local p=${CLAUDE_PID:-} exe _
+  local p=${CLAUDE_PID:-} exe r _
   for _ in 1 2 3 4; do
     p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null) || return 1
     [[ $p =~ ^[0-9]+$ ]] && (( p > 1 )) || return 1
     exe=$(readlink "/proc/$p/exe" 2>/dev/null)
-    case $exe in "$t3_runtime"/*) echo "$exe"; return 0 ;; esac
+    local IFS=:
+    for r in $t3_runtimes; do
+      case $exe in "$r"/*) echo "$exe"; return 0 ;; esac
+    done
   done
   return 1
 }

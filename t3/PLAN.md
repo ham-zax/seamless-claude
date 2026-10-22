@@ -55,7 +55,7 @@ After Phase 3 (path A' works live) the settle check through the T3 MCP tools is 
 
 ### `hooks/lib.sh`
 
-- `t3_session`: true only if an ancestor of `$CLAUDE_PID` runs a binary under `~/.t3/wsl-runtime/`. `CLAUDE_CODE_ENTRYPOINT=sdk-ts` alone is not enough (P3).
+- `t3_session`: true only if an ancestor of `$CLAUDE_PID` runs a binary under `~/.t3/wsl-runtime/` (WSL desktop app) or `~/.t3/runtime/` (Linux service, F1b). `CLAUDE_CODE_ENTRYPOINT=sdk-ts` alone is not enough (P3).
 - `t3_bin`: prints the `/proc/<ancestor>/exe` path of that ancestor (L1, L2). No hash in a config file.
 - `t3_thread_id <sid>`: finds the provider log that contains the session id (L3), turns the file name into a thread id, and confirms it with `t3 thread list --json`. Prints nothing if not found.
 

@@ -1,6 +1,8 @@
 # seamless-claude for T3 Code
 
-The handoff cycle of `../handoff/` for Claude threads in T3 Code (UI on Windows, server and Claude in WSL).
+The handoff cycle of `../handoff/` for Claude threads in T3 Code. Two setups work with the same files:
+the desktop app with the server in WSL (`~/.t3/wsl-runtime/`), and a Linux server with T3 as
+`t3code.service` (`~/.t3/runtime/`), for example with the mobile client through the relay.
 In tmux, the handoff hooks type `/clear`. T3 Code has no terminal. Here the T3 hooks compact the same
 thread through the `t3` CLI, inject the handoff, and continue without the user.
 
@@ -17,7 +19,8 @@ Rules in short: change only files in `t3/`. Use only Haiku (`claude-haiku-5-5`) 
 
 ## Find the `t3` CLI
 
-`t3` is not on `PATH`, and its folder changes with each nightly.
+The server binary is the CLI. Its folder changes with each nightly. On a Linux server
+`~/.local/bin/t3` is only the launcher: use the server binary.
 
 ```bash
 T3=$(readlink /proc/"$(jq .pid ~/.t3/userdata/server-runtime.json)"/exe)

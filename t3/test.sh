@@ -10,11 +10,15 @@ cleanup() { xargs -r kill < "$tmp/pids" 2>/dev/null; rm -rf "$tmp"; }
 trap cleanup EXIT
 export HOME=$tmp CLAUDE_CODE_SESSION_ATTENDED=0 CLAUDE_CODE_ENTRYPOINT=sdk-ts
 unset TMUX TMUX_PANE HANDOFF_NOTE
-export T3_HANDOFF_RUNTIME=$tmp/.t3/wsl-runtime T3_HANDOFF_USERDATA=$tmp/.t3/userdata T3_HANDOFF_CLI=$tmp/fake-t3
+# No T3_HANDOFF_RUNTIME: the default folders under $HOME (= $tmp) are tested.
+unset T3_HANDOFF_RUNTIME
+export T3_HANDOFF_USERDATA=$tmp/.t3/userdata T3_HANDOFF_CLI=$tmp/fake-t3
+wslrt=$tmp/.t3/wsl-runtime/sha256-x       # WSL desktop app layout
+svcrt=$tmp/.t3/runtime/versions/0.1.2     # Linux service layout (F1b)
 state=$HOME/.claude/handoffs/.state
 proj=$tmp/projects/-work
 hdir=$HOME/.claude/handoffs/-work
-mkdir -p "$proj" "$T3_HANDOFF_RUNTIME/sha256-x" "$T3_HANDOFF_USERDATA/logs/provider"
+mkdir -p "$proj" "$wslrt" "$svcrt" "$T3_HANDOFF_USERDATA/logs/provider"
 fail=0
 
 check() {   # name; reads the status of the previous condition
@@ -24,10 +28,11 @@ check() {   # name; reads the status of the previous condition
 }
 
 # Fake T3 server: a bash copy under the runtime folder. "sleep; :" keeps bash from exec-ing sleep.
-cp "$(command -v bash)" "$T3_HANDOFF_RUNTIME/sha256-x/t3"
-window() {   # prints the pid of a new Claude window under the fake server
+cp "$(command -v bash)" "$wslrt/t3"
+cp "$(command -v bash)" "$svcrt/t3"
+window() {   # [runtime folder]: prints the pid of a new Claude window under the fake server
   local server child
-  "$T3_HANDOFF_RUNTIME/sha256-x/t3" -c 'sleep 600; :' < /dev/null > /dev/null 2>&1 & server=$!
+  "${1:-$wslrt}/t3" -c 'sleep 600; :' < /dev/null > /dev/null 2>&1 & server=$!
   echo "$server" >> "$tmp/pids"
   for _ in $(seq 50); do child=$(pgrep -P "$server" | head -n 1); [ -n "$child" ] && break; sleep 0.1; done
   echo "$child" >> "$tmp/pids"
@@ -70,6 +75,12 @@ export CLAUDE_PID=$$
 mkdir -p "$hdir"; handoff o1 continue
 [ -z "$(stop o1)" ] && [ -z "$(inject o1)" ]; check "outside T3: stop and inject silent"
 [ "$(sends)" = 0 ]; check "outside T3: no t3 calls"
+
+# --- detection: both server layouts ---
+# shellcheck source=hooks/lib.sh
+(CLAUDE_PID=$(window "$svcrt"); . "$here/hooks/lib.sh"; [ "$(t3_server_exe)" = "$svcrt/t3" ]); check "detect: Linux service layout"
+# shellcheck source=hooks/lib.sh
+(CLAUDE_PID=$(window); . "$here/hooks/lib.sh"; [ "$(t3_server_exe)" = "$wslrt/t3" ]); check "detect: WSL desktop layout"
 
 # --- T3 window, first cycle ---
 CLAUDE_PID=$(window)

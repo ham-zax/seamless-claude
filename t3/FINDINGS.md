@@ -61,6 +61,7 @@ Details: `results/2026-10-22-phase1.md`. Test hook: `tools/phase1-hook.sh`.
 | # | Fact |
 |---|---|
 | F1 | The direct parent of `CLAUDE_PID` is the T3 server binary under `~/.t3/wsl-runtime/`. `/proc/<parent>/exe` gives the `t3` CLI path. |
+| F1b | On a Linux server (ARM, Ubuntu 24.04, same nightly 0.1.2-nightly.20261021.3499) T3 runs as `t3code.service`. The server binary is `~/.t3/runtime/versions/<version>/t3 serve`, and it is the direct parent of Claude. `~/.local/bin/t3` is the launcher (0.1.0), not the server. Thread ids from the UI are plain UUIDs (no `mcp:`). | `ps` and `systemctl --user` on `arm`, 2026-10-22 |
 | F2 | Two `t3 thread send` calls run in order. The second waits in the queue. |
 | F3 | A detached `t3 thread send` from a `Stop` hook works. `/compact` starts about 2 s later. |
 | F4 | After `/compact` and a server restart, the thread resumes the compacted context. The session id stays the same. |

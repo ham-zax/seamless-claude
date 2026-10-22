@@ -13,7 +13,8 @@ case ${1:-} in
 esac
 rt=$HOME/.t3/userdata/server-runtime.json
 model=claude-haiku-5-5
-now=$HOME/repo/seamless-claude/t3/hooks/handoff-now.sh
+t3dir=$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)
+now=$t3dir/hooks/handoff-now.sh
 fails=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -45,7 +46,7 @@ show_until() {
 texts() { jq -r --argjson f "$2" '.messages[$f:][] | "[\(.role)] \(.text // "" | gsub("\n"; " "))"' <<<"$1"; }
 
 # Cycle 1: status done → /compact, then the owed prompt.
-start=$(cd ~/repo && timeout 300 "$T3" thread start . "t3 live-check. Remember the code word KIWI-42. \
+start=$(cd "$t3dir/.." && timeout 300 "$T3" thread start . "t3 live-check. Remember the code word KIWI-42. \
 Say 1 with the code word. Then run $now in Bash, follow its instructions, write the handoff with \
 status: done, and end the turn." --provider claudeAgent --model "$model" --wait --json) ||
   { echo "thread start failed" >&2; exit 2; }
@@ -75,7 +76,12 @@ if (( s == 1 )); then ok "one session id in the thread"; else bad "$s session id
 
 if (( restart )); then
   old=$(jq -r .pid "$rt")
-  kill -TERM "$old"
+  # Linux service (F1b): systemd restarts it. WSL desktop app: the app restarts it after a TERM.
+  if [ "$(jq -r '.serviceManaged // false' "$rt")" = true ]; then
+    systemctl --user restart t3code.service
+  else
+    kill -TERM "$old"
+  fi
   for _ in $(seq 60); do
     p=$(jq -r .pid "$rt" 2>/dev/null) && [ "$p" != "$old" ] && kill -0 "$p" 2>/dev/null && break
     sleep 5
