@@ -1,10 +1,10 @@
 # Handoff hooks
 
-A lean alternative to the seamless-claude plugin. In tmux, near a per-model token limit, Claude
+In tmux, near a per-model token limit, Claude
 writes a short handoff file at a checkpoint and ends its turn. A hook then clears the session and
 continues from the handoff without you. Outside tmux, the hooks send no messages and native
 auto-compaction handles a full context. Native auto-compaction also stays on in tmux as the last
-fallback. There is no background model call.
+fallback. Only the optional side note calls a background model.
 
 ## Flow
 
