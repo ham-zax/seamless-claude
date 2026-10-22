@@ -61,7 +61,7 @@ if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
 fi
 # Every model: after max automatic clears the hook pauses once. The user's /clear resets the count
 # (handoff-inject.sh), and the next max clears run automatically again.
-max=7
+max=10
 cycles=$state/pid-$CLAUDE_PID.cycles
 n=0
 if [ -f "$cycles" ]; then
@@ -69,7 +69,7 @@ if [ -f "$cycles" ]; then
   [ "$cstart" = "$start" ] && [[ $cn =~ ^[0-9]+$ ]] && n=$cn
 fi
 if (( n >= max )); then
-  say "$max automatic clears in this window. Type /clear to continue in a new session."
+  say "Automatic clear limit reached ($n of $max in this window). The handoff is saved and correct. Type /clear to continue in a new session. Your /clear sets the count to 0."
   exit 0
 fi
 # One trigger per handoff: Stop can fire again before the /clear arrives. handoff-inject.sh removes
@@ -104,7 +104,8 @@ setsid -f bash -c '
       sleep 0.3
     done
   }
-  give_up() { printf "%s pane %s pid %s: %s\n" "$(date "+%F %T")" "$1" "$5" "$6" >> "$4"; exit 0; }
+  # A stale marker makes the next /clear of the user count as automatic and keep the count.
+  give_up() { rm -f "${4%/*}/pid-$5.auto"; printf "%s pane %s pid %s: %s\n" "$(date "+%F %T")" "$1" "$5" "$6" >> "$4"; exit 0; }
   sleep 2
   quiet "$1" || give_up "$@" "input for 30 s, /clear not typed"
   clr "$1" && tmux send-keys -t "$1" -l /clear && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys /clear failed"

@@ -20,8 +20,12 @@ sidenote_start=70000 sidenote_step=20000
 # sidenote_engine: prints the engine. Exit 1 when the side note is off.
 sidenote_engine() { case ${HANDOFF_NOTE:-} in haiku | pi) echo "$HANDOFF_NOTE" ;; *) return 1 ;; esac; }
 
-# sidenote_file <cwd> <pid> <start time>: prints the note path of the window.
-sidenote_file() { echo "$HOME/.claude/handoffs/${1//[^A-Za-z0-9]/-}/window-$2-$3.note.md"; }
+# handoff_dir <transcript>: prints the handoff folder of the session. The name is the project folder
+# of the transcript: Claude Code names it after the start folder, so a cd in the session does not move it.
+handoff_dir() { local p=${1%/*}; echo "$HOME/.claude/handoffs/${p##*/}"; }
+
+# sidenote_file <handoff folder> <pid> <start time>: prints the note path of the window.
+sidenote_file() { echo "$1/window-$2-$3.note.md"; }
 
 # sidenote_copy <note path>: the line that the handoff messages add when the side note is on.
 sidenote_copy() { echo "A side model keeps a note of the user's rules, approvals, open promises and decisions at $1. Before you write the handoff, read it if it exists, and copy each still-valid item that the handoff lacks. Check each item against what you know: the side model can be wrong."; }

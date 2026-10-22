@@ -46,13 +46,13 @@ pstart=$(sed 's/.*) //' "/proc/${CLAUDE_PID:-x}/stat" 2>/dev/null | cut -d' ' -f
 engine=; [ -z "$pstart" ] || engine=$(sidenote_engine)
 [ -n "$manual" ] || (( tokens >= warn )) || { [ -n "$engine" ] && (( tokens >= sidenote_start )); } || exit 0
 
-file=$HOME/.claude/handoffs/${cwd//[^A-Za-z0-9]/-}/$sid.md
+file=$(handoff_dir "$tp")/$sid.md
 state=$HOME/.claude/handoffs/.state
 mkdir -p "$state"
 k=$((tokens / 1000)) h=$((hard / 1000))
 copy=
 if [ -n "$engine" ]; then
-  note=$(sidenote_file "$cwd" "$CLAUDE_PID" "$pstart")
+  note=$(sidenote_file "${file%/*}" "$CLAUDE_PID" "$pstart")
   copy=" $(sidenote_copy "$note")"
   [ -n "$manual" ] || sidenote_tick "$engine" "$tp" "$tokens" "$warn" "$note" "$state" "$CLAUDE_PID" "$pstart"
 fi

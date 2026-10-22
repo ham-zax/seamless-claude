@@ -10,7 +10,7 @@
 set -u
 
 input=$(cat)
-IFS=$'\t' read -r tp sid cwd < <(jq -r '[.transcript_path, .session_id, .cwd] | @tsv' <<<"$input")
+IFS=$'\t' read -r tp sid < <(jq -r '[.transcript_path, .session_id] | @tsv' <<<"$input")
 state=$HOME/.claude/handoffs/.state
 # handoff-stop.sh marks the /clear it types. A /clear that the user types resets its count.
 if [ -e "$state/pid-${CLAUDE_PID:-x}.auto" ]; then
@@ -32,7 +32,7 @@ used=$dir/$old.used.md
 otp=${tp%/*}/$old.jsonl
 # shellcheck source=sidenote.sh
 . "${BASH_SOURCE[0]%/*}/sidenote.sh"
-note=$(sidenote_file "$cwd" "$CLAUDE_PID" "$start")
+note=$(sidenote_file "$(handoff_dir "$tp")" "$CLAUDE_PID" "$start")
 noteline=; [ -f "$note" ] && noteline="
 Side note of this window: $note. A side model keeps the user's rules, approvals, promises and decisions there, and it can be wrong. Read it only if the handoff seems to lack a rule, an approval or a promise, or the handoff says UNKNOWN."
 

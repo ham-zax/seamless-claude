@@ -47,6 +47,9 @@ out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
 [[ $out == *"Carry forward"*"UNKNOWN"*"Write every section"*"## Constraints"*"## Uncertainty"*"## Live state"* ]]; check "warn: template has carry-forward, UNKNOWN, constraints and uncertainty"
 [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: handoff bound to this window"
 [ -z "$(nudge UserPromptSubmit s1 "$proj/s1.jsonl")" ]; check "warn: not repeated"
+rm -f "$state/s1.warn"
+out=$(cwd=/work/packages/core nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
+[[ $out == *"write the handoff to: $hdir/s1.md"* ]] && [ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/s1.md claude-opus-5-5" ]; check "warn: cwd in a subfolder: same handoff folder"
 
 transcript "$proj/s1.jsonl" 151000
 out=$(nudge PostToolUse s1 "$proj/s1.jsonl" | ctx)
@@ -301,6 +304,7 @@ for _ in $(seq 100); do [ "$(wc -l < "$tmp/polls" 2>/dev/null || echo 0)" -ge 60
 for _ in $(seq 50); do [ -s "$state/clear.log" ] && break; command sleep 0.1; done
 [ "$(wc -l < "$tmp/polls" 2>/dev/null)" = 60 ] && [ ! -e "$tmp/keys" ]; check "stop, user typing: helper gives up, types nothing"
 rg -q "pane %9 pid $$: input for 30 s, /clear not typed" "$state/clear.log"; check "stop, user typing: give-up logged"
+[ ! -e "$state/pid-$$.auto" ]; check "stop, user typing: marker removed, so the user's /clear resets the count"
 
 reset; handoff t1 continue
 echo "$(( $(date +%s) + 100 )) %3" > "$tmp/activity"   # the user types in another pane
@@ -316,19 +320,19 @@ rm -f "$tmp/keys"; handoff t1 continue
 [ -z "$(in_tmux stop t1)" ] && [ ! -e "$tmp/keys" ]; check "stop again before /clear: no second trigger"
 
 reset; handoff t1 continue
-cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 7"
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 10"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
-[[ $out == *"7 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, opus limit 7: user types /clear"
+[[ $out == *"limit reached (10 of 10"*"handoff is saved"*"sets the count to 0"* ]] && [ ! -e "$tmp/keys" ]; check "stop, opus limit 10: user types /clear"
 
 reset; handoff t1 continue claude-haiku-5-5
-cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 7"
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 10"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
-[[ $out == *"7 automatic clears"* ]] && [ ! -e "$tmp/keys" ]; check "stop, haiku limit 7: user types /clear"
+[[ $out == *"limit reached (10 of 10"*"handoff is saved"*"sets the count to 0"* ]] && [ ! -e "$tmp/keys" ]; check "stop, haiku limit 10: user types /clear"
 
 reset; handoff t1 continue
-cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 6"
+cat > "$state/pid-$$.cycles" <<<"$(start_of $$) 9"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
-[[ $out == *"cycle 7"* && $(keys) == *"/clear"* ]]; check "stop, cycle 7 of 7: still clears"
+[[ $out == *"cycle 10"* && $(keys) == *"/clear"* ]]; check "stop, cycle 10 of 10: still clears"
 
 # --- record: last reply and earlier transcripts ---
 reset; handoff t1 "done"
@@ -351,11 +355,11 @@ manual() { "$here/handoff-nudge.sh" --manual; }
 reset; rm -rf "$hdir"; mkdir -p "$tmp/.claude/projects/-work"
 transcript "$tmp/.claude/projects/-work/m1.jsonl" 20000 claude-haiku-5-5
 out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 manual)
-[[ $out == *"(/handoff)"*"Write the handoff to $HOME/.claude/handoffs/-tmp/m1.md"*"Outside tmux"*"## Next step"* ]]; check "manual: low context, outside tmux: instructions with template"
-[ "$(cat "$state/pid-$$")" = "$(start_of $$) $HOME/.claude/handoffs/-tmp/m1.md claude-haiku-5-5" ]; check "manual: handoff bound to this window"
+[[ $out == *"(/handoff)"*"Write the handoff to $hdir/m1.md"*"Outside tmux"*"## Next step"* ]]; check "manual: low context, outside tmux: instructions with template"
+[ "$(cat "$state/pid-$$")" = "$(start_of $$) $hdir/m1.md claude-haiku-5-5" ]; check "manual: cwd in another folder: handoff bound in the project folder"
 out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 TMUX=/tmp/x,1,0 TMUX_PANE=%9 manual)
 [[ $out == *"A hook then clears the session"* && $out != *"Outside tmux"* ]]; check "manual: in tmux, hook clears"
-mkdir -p "$HOME/.claude/handoffs/-tmp" && echo x > "$HOME/.claude/handoffs/-tmp/m1.md"
+mkdir -p "$hdir" && echo x > "$hdir/m1.md"
 out=$(cd /tmp && CLAUDE_CODE_SESSION_ID=m1 manual)
 [[ $out == *"exists"* && $out != *"## Next step"* ]]; check "manual: handoff exists: no second template"
 out=$(CLAUDE_CODE_SESSION_ID=nope manual)

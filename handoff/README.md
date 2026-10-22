@@ -13,7 +13,7 @@ fallback. Only the optional side note calls a background model.
    assistant entry.
 2. At the warn limit it injects one heads-up message with the template: continue the work, plan a
    checkpoint (a finished, verified step) within about 10k tokens, and do not start a sub-task that
-   cannot finish before it. At the checkpoint, write the handoff to `~/.claude/handoffs/<cwd-slug>/<session-id>.md` as the last
+   cannot finish before it. At the checkpoint, write the handoff to `~/.claude/handoffs/<project-slug>/<session-id>.md` as the last
    action and end the turn. A handoff never replaces a reply: Claude answers a short user question in
    visible text first, else lists it under `## Owed to the user`. The hook also binds the handoff to
    this Claude window: `CLAUDE_PID`, the process start time and the model.
@@ -42,8 +42,9 @@ fallback. Only the optional side note calls a background model.
      in this pane (tmux `client_activity` of clients that show this pane), and gives up after 30 s
      of typing. Input in other panes does not count. Each give-up appends a line to
      `~/.claude/handoffs/.state/clear.log`;
-   - outside tmux, or after 7 automatic clears in the window (every model), it tells you to type
-     `/clear`. Your `/clear` resets the count, and the next 7 clears run automatically.
+   - outside tmux, or after 10 automatic clears in the window (every model), it tells you to type
+     `/clear`. Your `/clear` sets the count to 0, and the next 10 clears run automatically. A
+     give-up also removes the `.auto` marker, so your next `/clear` sets the count to 0.
 6. `handoff-inject.sh` (SessionStart, matcher `clear`) loads the handoff bound to this window, if the
    file exists and is less than 2 h old, and renames it to `<session-id>.used.md`. The header gives
    the old transcript path and a `jq` command that prints only the user's messages, so the new
@@ -62,7 +63,8 @@ Install it with `ln -s ~/repo/seamless-claude/handoff/handoff.md ~/.claude/comma
 time protects against a reused PID. If you close the window instead of typing `/clear`, the handoff
 stays on disk: tell the new session to read it.
 
-`<cwd-slug>` is the working directory with every non-alphanumeric character replaced by `-`.
+`<project-slug>` is the name of the transcript folder in `~/.claude/projects/`: the start folder of the
+session with every non-alphanumeric character replaced by `-`. A `cd` in the session does not change it.
 All hooks do nothing unless `CLAUDE_CODE_SESSION_ATTENDED=1`, so `claude -p`, SDK runs and workers
 are not affected. `handoff-nudge.sh` also does nothing unless `$TMUX` and `$TMUX_PANE` are set, so
 outside tmux no handoff starts and native auto-compaction runs.
@@ -128,9 +130,9 @@ inside tmux (for example `tmux new -A -s main`, then `claude`).
 
 ## Files
 
-- `~/.claude/handoffs/<cwd-slug>/<session-id>.md`: handoff, written by Claude.
-- `~/.claude/handoffs/<cwd-slug>/<session-id>.used.md`: handoff after injection. Kept for review.
-- `~/.claude/handoffs/<cwd-slug>/window-<pid>-<start time>.note.md`: side note of a window, only
+- `~/.claude/handoffs/<project-slug>/<session-id>.md`: handoff, written by Claude.
+- `~/.claude/handoffs/<project-slug>/<session-id>.used.md`: handoff after injection. Kept for review.
+- `~/.claude/handoffs/<project-slug>/window-<pid>-<start time>.note.md`: side note of a window, only
   when the side note is on. Kept for review.
 - `~/.claude/handoffs/.state/pid-<pid>.note` (`<start time> <transcript> <read position>`),
   `.note.at` (`<start time> <transcript> <tokens at the last start> <last run started 0|1>`) and
