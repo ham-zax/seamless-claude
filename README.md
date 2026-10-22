@@ -6,6 +6,7 @@ Lean Claude Code hooks for long sessions. This fork no longer contains the upstr
 | Path | What it does | Live copy |
 | --- | --- | --- |
 | `handoff/` | Handoff before `/clear`: nudge, stop, inject hooks, `/handoff` command, side note. See `handoff/README.md`. | Runs from this repo |
+| `t3/` | The same handoff cycle for Claude threads in T3 Code: compacts the same thread instead of `/clear`. See `t3/README.md`. | Runs from this repo (`t3/install.sh`) |
 | `hooks/cachebeat-hook.sh` | Stop hook: keeps the prompt cache warm while a session is idle. | `~/.claude/hooks/` |
 | `skills/cachebeat/` | `beat.sh` watcher that `cachebeat-hook.sh` runs, and its skill. | `~/.claude/skills/cachebeat/` |
 | `hooks/compact-recover.sh` | SessionStart (compact): shows git state after compaction. | `~/.claude/hooks/` |
