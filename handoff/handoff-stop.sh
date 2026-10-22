@@ -28,7 +28,8 @@ fi
 status=$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } $1 == "status:" { print $2; exit }' "$file")
 case $status in
   continue) prompt="Continue from the handoff." ;;
-  done)     prompt="" ;;
+  # The screen is clear after the /clear: show the user what is open, then wait.
+  done)     prompt="Show me only what the handoff lists under ## Owed to the user. Do not start the Next step." ;;
   *)        exit 0 ;;
 esac
 
@@ -114,5 +115,5 @@ setsid -f bash -c '
   quiet "$1" || give_up "$@" "input for 30 s, prompt not typed"
   clr "$1" && tmux send-keys -t "$1" -l "$3" && tmux send-keys -t "$1" Enter || give_up "$@" "send-keys prompt failed"
 ' handoff-clear "$TMUX_PANE" "$rec" "$prompt" "$state/clear.log" "$CLAUDE_PID" < /dev/null > /dev/null 2>&1
-if [ -n "$prompt" ]; then next="continuing in a new session"; else next="the new session waits for you"; fi
+if [ "$status" = continue ]; then next="continuing in a new session"; else next="the new session shows what is owed, then waits for you"; fi
 say "Handoff written. Clearing, $next (cycle $((n + 1))). If you type in this pane, the hook waits. After 30 s of typing it gives up: then type /clear. The hook deletes unsent text in the input box before it types."

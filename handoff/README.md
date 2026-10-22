@@ -28,8 +28,9 @@ fallback. There is no background model call.
    `status: done`.
 5. `handoff-stop.sh` (Stop) blocks the stop once if this session's handoff has no
    `## Owed to the user` section. Then it clears after every handoff, so no turn runs after it. With
-   `status: continue` it also types a continue prompt. With `status: done` the new session waits for
-   you:
+   `status: continue` it also types a continue prompt. With `status: done` it types a prompt that
+   asks the new session to show only the `## Owed to the user` items, and then the session waits
+   for you:
    - first it appends a record to the handoff: `## Last reply to the user` (the final visible reply
      from the Stop input `last_assistant_message`, cut at 6000 characters) and `## Earlier
      transcripts` (up to 4 sessions before this one). It replaces the record on every Stop until the
@@ -82,13 +83,16 @@ detached process with the handoff hooks off. It reads the note and the user and 
 the last good run (no tool output, the newest 400,000 characters at most), writes the updated note
 through a temp file and a rename, and stops within 300 s.
 
-- One run at a time: a lock file blocks a second run. The hook tries again on the next tool call.
+- One run at a time: a lock file blocks a second run. The blocked tick writes `.note.want`, and
+  the working run then does one more pass that reads the new text (2 passes at most per run).
   A lock older than 6 min belongs to a dead run and is removed.
+- The last run starts even when the handoff file already exists.
 - A run saves the read position only after it succeeds, so a blocked or failed run loses no text.
 - The note belongs to the window (PID and start time), not to the session. After `/clear` the new
   session keeps the note, and a last run that ends after the `/clear` still updates it.
 - The warn, stop and `/handoff` messages tell Claude to read the note, check it, and copy each
-  still-valid item into the handoff. The restore header names the note.
+  still-valid item into the handoff. The restore header names the note and tells the new session to
+  read it only if the handoff seems to lack a rule, an approval or a promise, or says `UNKNOWN`.
 
 ## Limits
 
@@ -130,7 +134,8 @@ inside tmux (for example `tmux new -A -s main`, then `claude`).
   when the side note is on. Kept for review.
 - `~/.claude/handoffs/.state/pid-<pid>.note` (`<start time> <transcript> <read position>`),
   `.note.at` (`<start time> <transcript> <tokens at the last start> <last run started 0|1>`) and
-  `.note.lock` (a run works): side note state.
+  `.note.lock` (a run works) and `.note.want` (a blocked tick asks for one more pass): side note
+  state.
 - `~/.claude/handoffs/.state/<session-id>.warn` and `.hard`: tiers already injected for a session.
   The hook creates them atomically, so parallel tool calls inject each message once.
 - `~/.claude/handoffs/.state/pid-<pid>`: `<start time> <handoff path> <model>`, the binding to a window.

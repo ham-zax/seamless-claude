@@ -34,7 +34,7 @@ otp=${tp%/*}/$old.jsonl
 . "${BASH_SOURCE[0]%/*}/sidenote.sh"
 note=$(sidenote_file "$cwd" "$CLAUDE_PID" "$start")
 noteline=; [ -f "$note" ] && noteline="
-Side note of this window (a side model keeps the user's rules, approvals, promises and decisions; it can be wrong): $note"
+Side note of this window: $note. A side model keeps the user's rules, approvals, promises and decisions there, and it can be wrong. Read it only if the handoff seems to lack a rule, an approval or a promise, or the handoff says UNKNOWN."
 
 ctx="# Handoff restored after /clear
 Source session: $old (full history: claude --resume $old)

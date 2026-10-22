@@ -46,7 +46,8 @@ sidenote_tick() {
     || (tokens >= warn && final == 0) )) || return 0
   # A run ends within 300 s. A lock older than 6 min belongs to a run that died.
   [ -z "$(find "$lock" -mmin +6 2>/dev/null)" ] || rm -f "$lock"
-  (set -o noclobber; : > "$lock") 2>/dev/null || return 0   # a run works: retry on the next call
+  # A run works: ask it for one more pass, so the text since its start is not lost.
+  (set -o noclobber; : > "$lock") 2>/dev/null || { : > "$st/pid-$pid.note.want"; return 0; }
   (( tokens >= warn )) && final=1
   printf '%s %s %s %s\n' "$start" "$tp" "$tokens" "$final" > "$at"
   mkdir -p "${note%/*}"
@@ -54,12 +55,14 @@ sidenote_tick() {
   setsid nohup env -u TMUX -u TMUX_PANE CLAUDE_CODE_SESSION_ATTENDED=0 \
     bash -c '
       engine=$1 tp=$2 note=$3 pos=$4 lock=$5 start=$6 prompt=$7
-      chunk=$note.chunk in=$note.in
+      chunk=$note.chunk in=$note.in want=${pos}.want
       trap "rm -f \"\$lock\" \"\$chunk\" \"\$in\" \"\$note.tmp\"" EXIT
+      rm -f "$want"
+      once() {
       off=0
       if read -r s t o 2>/dev/null < "$pos" && [ "$s" = "$start" ] && [ "$t" = "$tp" ] && [[ $o =~ ^[0-9]+$ ]]; then off=$o; fi
-      size=$(stat -c %s "$tp") || exit 0
-      (( size > off )) || exit 0
+      size=$(stat -c %s "$tp") || return 0
+      (( size > off )) || return 0
       tail -c +$((off + 1)) "$tp" | head -c $((size - off)) > "$chunk"
       # A partial last line stays for the next run.
       [ -z "$(tail -c 1 "$chunk")" ] || sed -i "\$d" "$chunk"
@@ -69,15 +72,18 @@ sidenote_tick() {
       text=$(jq -Rr '\''fromjson? // empty | select(.type == "user" or .type == "assistant") | (.message.content | if type == "string" then . else (map(select(.type == "text") | .text) | join(" ")) end | gsub("\n"; " ") | gsub("<system-reminder>.*?</system-reminder>"; "")) as $t | select($t | test("\\S")) | "[\(.type)] \($t)"'\'' "$chunk" | tail -c 400000)
       if [ -n "$text" ]; then
         { echo "=== Current note"; cat "$note" 2>/dev/null || echo none; echo "=== Newest session text"; echo "$text"; } > "$in"
-        cd "${note%/*}" || exit 0
+        cd "${note%/*}" || return 0
         case $engine in
           haiku) timeout 300 claude -p --model claude-haiku-5-5 --effort xhigh --no-session-persistence \
                    --settings "{\"disableAllHooks\": true}" "$prompt" < "$in" > "$note.tmp" ;;
           pi)    timeout 300 pi -p --model opencode2api/minimax-m3.1-flash-free --no-session --no-context-files \
                    "@$in" "$prompt" < /dev/null > "$note.tmp" ;;
-        esac && [ -s "$note.tmp" ] && mv "$note.tmp" "$note" || exit 0
+        esac && [ -s "$note.tmp" ] && mv "$note.tmp" "$note" || return 0
       fi
       printf "%s %s %s\n" "$start" "$tp" "$new" > "$pos"
+      }
+      # One more pass if a tick came while this run worked (at most 2 passes, within the 6 min lock).
+      once; [ -e "$want" ] && rm -f "$want" && touch "$lock" && once
     ' sidenote "$engine" "$tp" "$note" "$st/pid-$pid.note" "$lock" "$start" "$sidenote_prompt" \
     > /dev/null 2>&1 < /dev/null &
 }

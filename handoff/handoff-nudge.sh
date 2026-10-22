@@ -47,7 +47,6 @@ engine=; [ -z "$pstart" ] || engine=$(sidenote_engine)
 [ -n "$manual" ] || (( tokens >= warn )) || { [ -n "$engine" ] && (( tokens >= sidenote_start )); } || exit 0
 
 file=$HOME/.claude/handoffs/${cwd//[^A-Za-z0-9]/-}/$sid.md
-[ -e "$file" ] && fail "The handoff $file exists. End your turn: the Stop hook continues from it."   # handoff written: no more messages
 state=$HOME/.claude/handoffs/.state
 mkdir -p "$state"
 k=$((tokens / 1000)) h=$((hard / 1000))
@@ -57,6 +56,8 @@ if [ -n "$engine" ]; then
   copy=" $(sidenote_copy "$note")"
   [ -n "$manual" ] || sidenote_tick "$engine" "$tp" "$tokens" "$warn" "$note" "$state" "$CLAUDE_PID" "$pstart"
 fi
+# After the handoff only the side note ticks, so its last run can cover the end of the session.
+[ -e "$file" ] && fail "The handoff $file exists. End your turn: the Stop hook continues from it."   # handoff written: no more messages
 # One message per tier: parallel tool calls run this hook at the same time, and only the hook that
 # creates the marker file first injects.
 mark() { (set -o noclobber; : > "$state/$sid.$1") 2>/dev/null; }

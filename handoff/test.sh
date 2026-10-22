@@ -6,7 +6,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 # This test shell stands in for the Claude window: hooks bind handoffs to CLAUDE_PID.
 export HOME=$tmp CLAUDE_CODE_SESSION_ATTENDED=1 CLAUDE_PID=$$
-unset TMUX TMUX_PANE
+unset TMUX TMUX_PANE HANDOFF_NOTE
 state=$HOME/.claude/handoffs/.state
 proj=$tmp/projects/-work
 mkdir -p "$proj"
@@ -102,7 +102,7 @@ out=$(nudge UserPromptSubmit s9 "$proj/s9.jsonl" | ctx)
 bin=$tmp/bin; mkdir -p "$bin"
 for e in claude pi; do
   # shellcheck disable=SC2016  # the stub expands its own variables
-  printf '#!/usr/bin/env bash\necho run >> "%s"\necho "%s args: $*"; echo "attended=${CLAUDE_CODE_SESSION_ATTENDED:-} tmux=${TMUX:-}"; cat\n' "$tmp/runs" "$e" > "$bin/$e"
+  printf '#!/usr/bin/env bash\n[ ! -e "%s" ] || sleep 1\necho run >> "%s"\necho "%s args: $*"; echo "attended=${CLAUDE_CODE_SESSION_ATTENDED:-} tmux=${TMUX:-}"; cat\n' "$tmp/slow" "$tmp/runs" "$e" > "$bin/$e"
   chmod +x "$bin/$e"
 done
 note=$hdir/window-$$-$(start_of $$).note.md lock=$state/pid-$$.note.lock
@@ -129,7 +129,7 @@ sn w1 > /dev/null; idle
 grow w1 92000; say assistant "I will check the lock later" w1
 : > "$lock"
 sn w1 > /dev/null; sleep 0.3
-[ "$(runs)" = 1 ]; check "side note: a working run blocks a new run"
+[ "$(runs)" = 1 ] && [ -e "$state/pid-$$.note.want" ]; check "side note: a working run blocks a new run and asks it for one more pass"
 touch -d '-7 minutes' "$lock"
 sn w1 > /dev/null; idle
 n=$(cat "$note")
@@ -150,6 +150,13 @@ E=pi sn w3 > /dev/null; idle
 transcript "$proj/w4.jsonl" 141000
 out=$(E=sonnet sn w4 | ctx); sleep 0.3
 [[ $out != *"side model"* ]] && [ "$(runs)" = 5 ]; check "side note: unknown engine is off"
+transcript "$proj/w5.jsonl" 71000; say user "first" w5; : > "$tmp/slow"
+sn w5 > /dev/null; sleep 0.3; grow w5 92000; say user "second" w5; sn w5 > /dev/null; idle; idle; rm -f "$tmp/slow"
+[ "$(runs)" = 7 ] && [[ $(cat "$note") == *"[user] second"* ]] && [ ! -e "$state/pid-$$.note.want" ]; check "side note: a tick during a run gives one more pass that reads the new text"
+grow w5 141000; mkdir -p "$hdir" && echo x > "$hdir/w5.md"; say user "after handoff" w5
+out=$(sn w5); idle
+[[ $out == *"exists"* || -z $out ]] && [ "$(runs)" = 8 ] && [[ $(cat "$note") == *"[user] after handoff"* ]]; check "side note: last run still starts after the handoff exists"
+rm -f "$hdir/w5.md"
 echo "## Goal W" > "$hdir/w.md"; printf '%s %s\n' "$(start_of $$)" "$hdir/w.md" > "$state/pid-$$"
 out=$(jq -nc --arg t "$proj/new.jsonl" --arg c "$cwd" '{transcript_path: $t, session_id: "neww", source: "clear", cwd: $c}' | "$here/handoff-inject.sh" | ctx)
 [[ $out == *"Side note of this window"*"$note"*"## Goal W"* ]]; check "inject: header names the side note"
@@ -255,12 +262,18 @@ reset; handoff t1 "done"
 out=$(in_tmux stop t1 | jq -r .systemMessage)
 for _ in $(seq 50); do [ -e "$state/pid-$$" ] || break; command sleep 0.1; done
 command sleep 0.3
-[[ $out == *"the new session waits for you"* ]] && [ "$(cat "$tmp/keys")" = "send-keys -t %9 -l x
+[[ $out == *"the new session shows what is owed, then waits for you"* ]] && [ "$(cat "$tmp/keys")" = "send-keys -t %9 -l x
 send-keys -t %9 Escape Escape
 send-keys -t %9 -l x
 send-keys -t %9 Escape Escape
 send-keys -t %9 -l /clear
-send-keys -t %9 Enter" ]; check "stop, status done: clears, types no prompt"
+send-keys -t %9 Enter
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l x
+send-keys -t %9 Escape Escape
+send-keys -t %9 -l Show me only what the handoff lists under ## Owed to the user. Do not start the Next step.
+send-keys -t %9 Enter" ]; check "stop, status done: clears, types the owed-items prompt"
 
 reset; handoff t1 continue
 [ -z "$(in_tmux stop t2)" ] && [ ! -e "$tmp/keys" ]; check "stop, other session's handoff: nothing"
